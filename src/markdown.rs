@@ -98,6 +98,14 @@ mod tests {
     }
 
     #[test]
+    fn line_start_tag_is_a_tag_not_a_heading() {
+        // The composer seeds notes with "\n\n#username"; without a space after
+        // '#' it's a tag, not an ATX heading. Both must hold for that to work.
+        assert_eq!(extract_tags("a thought\n\n#jbudding"), vec!["jbudding"]);
+        assert!(!render("a thought\n\n#jbudding").contains("<h1"));
+    }
+
+    #[test]
     fn renders_escaped_html() {
         let html = render("<script>alert(1)</script>");
         assert!(!html.contains("<script>"));

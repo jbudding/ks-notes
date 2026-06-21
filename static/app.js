@@ -190,8 +190,32 @@ document.body.addEventListener("htmx:afterRequest", function (e) {
   var btn = saveButton(e.detail);
   // On success the form is swapped away; this restores the button on errors or
   // on the composer (which resets in place rather than being replaced).
-  if (!btn || btn.dataset.label === undefined) return;
-  btn.textContent = btn.dataset.label;
-  delete btn.dataset.label;
-  btn.classList.remove("saving");
+  if (btn && btn.dataset.label !== undefined) {
+    btn.textContent = btn.dataset.label;
+    delete btn.dataset.label;
+    btn.classList.remove("saving");
+  }
+
+  // After a note is posted the composer resets to empty; re-seed it for the
+  // next note (deferred so the inline reset handler runs first).
+  var form = e.detail && e.detail.elt;
+  if (form && form.classList && form.classList.contains("composer") && e.detail.successful) {
+    setTimeout(function () {
+      seedSelfTag(form.querySelector("textarea[data-self-tag]"));
+    }, 0);
+  }
 });
+
+// Seed an empty composer with the author's own #tag on its own line, a blank
+// line below the cursor, so every note is self-tagged but typed above it.
+function seedSelfTag(ta) {
+  if (!ta || ta.value.trim() !== "") return;
+  var tag = ta.getAttribute("data-self-tag");
+  if (!tag) return;
+  ta.value = "\n\n#" + tag;
+  try {
+    ta.setSelectionRange(0, 0);
+  } catch (_) {}
+}
+
+document.querySelectorAll("textarea[data-self-tag]").forEach(seedSelfTag);
