@@ -176,20 +176,24 @@ document.addEventListener("change", function (e) {
   }, Promise.resolve());
 });
 
-// Re-localize timestamps inside htmx-swapped fragments, and keep the full-page
-// state coherent across swaps: editing always opens full screen; swapping back
-// to a normal card drops the body lock once nothing is expanded.
+// After any swap, reconcile full-page state. We scan the DOM rather than trust
+// e.target because an outerHTML swap fires afterSwap on the parent, not the new
+// node. Editing always opens full screen; once nothing is expanded, unlock body.
+function reconcileExpanded() {
+  var editor = document.querySelector(".memo-editor");
+  if (editor) {
+    setExpanded(editor, true);
+    var ta = editor.querySelector("textarea");
+    if (ta) autosize(ta);
+  }
+  if (!document.querySelector(".memo-card.memo-expanded")) {
+    document.body.classList.remove("has-expanded-memo");
+  }
+}
+
 document.body.addEventListener("htmx:afterSwap", function (e) {
   localizeTimes(e.target);
-  var el = e.target;
-  if (!el || !el.classList) return;
-  if (el.classList.contains("memo-editor")) {
-    setExpanded(el, true);
-  } else if (el.classList.contains("memo-card")) {
-    if (!document.querySelector(".memo-card.memo-expanded")) {
-      document.body.classList.remove("has-expanded-memo");
-    }
-  }
+  reconcileExpanded();
 });
 
 // Give the Save button immediate feedback while the form request is in flight:
