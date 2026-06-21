@@ -352,6 +352,21 @@ label { display: block; margin: 12px 0 4px; font-weight: 500; }
 .memo-actions { display: flex; gap: 2px; opacity: 0.25; transition: opacity 0.15s; }
 .memo-card:hover .memo-actions { opacity: 1; }
 
+/* Full-page toggle: one note fills the viewport, scrollable, above the rest. */
+.memo-card.memo-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: auto;
+  padding: 28px max(24px, 5vw);
+}
+.memo-card.memo-expanded .memo-actions { opacity: 1; }
+body.has-expanded-memo { overflow: hidden; }
+
 .memo-content { overflow-wrap: anywhere; }
 .memo-content > *:first-child { margin-top: 0; }
 .memo-content > *:last-child { margin-bottom: 0; }

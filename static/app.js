@@ -49,6 +49,30 @@ document.addEventListener("DOMContentLoaded", function () {
   localizeTimes(document);
 });
 
+// Full-page toggle: maximize a single note, click again (or Esc) to restore.
+function setExpanded(card, on) {
+  card.classList.toggle("memo-expanded", on);
+  document.body.classList.toggle("has-expanded-memo", on);
+  var btn = card.querySelector(".memo-expand");
+  if (btn) {
+    btn.textContent = on ? "Exit" : "Full";
+    btn.title = on ? "Exit full page" : "Full page";
+  }
+}
+
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest(".memo-expand");
+  if (!btn) return;
+  var card = btn.closest(".memo-card");
+  if (card) setExpanded(card, !card.classList.contains("memo-expanded"));
+});
+
+document.addEventListener("keydown", function (e) {
+  if (e.key !== "Escape") return;
+  var card = document.querySelector(".memo-card.memo-expanded");
+  if (card) setExpanded(card, false);
+});
+
 // --- Inline attachments ------------------------------------------------------
 // Selecting files uploads each to /resources; on success a {{attach:UID}} token
 // is placed in the note at the cursor (the "attachment point"), so attachments

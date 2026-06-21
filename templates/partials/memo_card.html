@@ -6,6 +6,7 @@
     <span>@{{ m.username }}</span>
     {% if m.visibility != "private" %}<span class="vis">{{ m.visibility }}</span>{% endif %}
     <span class="spacer"></span>
+    <button type="button" class="btn-ghost memo-expand" title="Full page">Full</button>
     {% if m.can_edit %}
     <div class="memo-actions">
       {% if !m.archived %}
