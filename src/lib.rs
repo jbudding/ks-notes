@@ -13,6 +13,11 @@ use std::sync::Arc;
 /// Crate version, surfaced in the UI next to the brand.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Fingerprint of the bundled static assets (set by `build.rs`), used as a
+/// cache-busting `?v=` query on the `app.css` / `app.js` links so browsers pick
+/// up changes despite the long `Cache-Control` on `/static/*`.
+pub const ASSET_HASH: &str = env!("ASSET_HASH");
+
 use crate::config::Config;
 use crate::error::AppError;
 use crate::state::AppState;

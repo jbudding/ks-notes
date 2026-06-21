@@ -191,7 +191,10 @@ function reconcileExpanded() {
   }
 }
 
-document.body.addEventListener("htmx:afterSwap", function (e) {
+// Use afterSettle, not afterSwap: with htmx's settle transition the swapped-in
+// editor isn't matchable as `.memo-editor` until settle completes, so reconciling
+// on afterSwap would miss it and editing wouldn't open full screen.
+document.body.addEventListener("htmx:afterSettle", function (e) {
   localizeTimes(e.target);
   reconcileExpanded();
 });
