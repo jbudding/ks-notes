@@ -15,7 +15,11 @@ use tower_http::trace::TraceLayer;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
-    let max_body = state.config.max_upload_mb * 1024 * 1024;
+    // 0 means "no cap" — uploads are bounded only by memory and SQLite's blob limit.
+    let max_body = match state.config.max_upload_mb {
+        0 => usize::MAX,
+        mb => mb * 1024 * 1024,
+    };
     Router::new()
         .route("/", get(pages::home))
         .route("/explore", get(pages::explore))

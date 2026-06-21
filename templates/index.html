@@ -36,15 +36,13 @@
 
     {% if show_composer %}
     <form class="composer" hx-post="/memos" hx-target="#memo-feed" hx-swap="afterbegin"
-          hx-on::after-request="if(event.detail.successful) { this.reset(); this.querySelector('.attach-chips').innerHTML=''; }">
+          hx-on::after-request="if(event.detail.successful && event.detail.elt === this) { this.reset(); this.querySelector('.attach-chips').innerHTML=''; }">
       <textarea name="content" placeholder="Any thoughts…" required></textarea>
       <input type="hidden" name="resources" value="" class="resource-uids">
       <div class="attach-chips"></div>
       <div class="composer-bar">
         <label class="btn-ghost" title="Attach files">
-          📎<input type="file" name="file" multiple hidden class="file-input"
-                   hx-post="/resources" hx-encoding="multipart/form-data"
-                   hx-target="previous .attach-chips" hx-swap="beforeend">
+          📎<input type="file" name="file" multiple hidden class="file-input">
         </label>
         <span class="spacer"></span>
         <select name="visibility">

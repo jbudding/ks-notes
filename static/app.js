@@ -49,7 +49,7 @@ document.addEventListener("DOMContentLoaded", function () {
   localizeTimes(document);
 });
 
-// Keep the hidden `resources` field in sync with the upload chips.
+// Keep the hidden `resources` field in sync with the finished upload chips.
 function syncResources(chipsEl) {
   var form = chipsEl.closest("form");
   if (!form) return;
@@ -61,8 +61,6 @@ function syncResources(chipsEl) {
     });
     hidden.value = uids.join(" ");
   }
-  var fileInput = form.querySelector(".file-input");
-  if (fileInput) fileInput.value = "";
 }
 
 document.addEventListener("click", function (e) {
@@ -72,6 +70,95 @@ document.addEventListener("click", function (e) {
     rm.closest(".chip").remove();
     if (chips) syncResources(chips);
   }
+});
+
+// --- Per-file uploads with a progress bar -----------------------------------
+// Each selected file uploads on its own request to /resources, in order, so the
+// user sees a progress bar per file. The server returns a chip fragment (with
+// data-uid) that replaces the progress row once the file lands.
+
+function csrfToken() {
+  try {
+    return JSON.parse(document.body.getAttribute("hx-headers") || "{}")["X-CSRF-Token"] || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+// Track in-flight uploads per form so Save stays disabled until the queue drains.
+function setUploading(form, delta) {
+  var n = (parseInt(form.dataset.uploading || "0", 10) || 0) + delta;
+  if (n < 0) n = 0;
+  form.dataset.uploading = n;
+  var save = form.querySelector("button[type=submit]");
+  if (save) save.disabled = n > 0;
+}
+
+function uploadOne(form, chipsEl, file) {
+  return new Promise(function (resolve) {
+    var row = document.createElement("span");
+    row.className = "chip uploading";
+    row.innerHTML =
+      '<span class="up-name"></span><span class="up-bar"><i class="up-fill"></i></span>';
+    row.querySelector(".up-name").textContent = "📎 " + file.name;
+    chipsEl.appendChild(row);
+    var fill = row.querySelector(".up-fill");
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/resources");
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.upload.addEventListener("progress", function (e) {
+      if (e.lengthComputable) fill.style.width = Math.round((e.loaded / e.total) * 100) + "%";
+    });
+    xhr.addEventListener("load", function () {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        row.outerHTML = xhr.responseText; // becomes a real .chip[data-uid]
+        syncResources(chipsEl);
+      } else {
+        row.classList.remove("uploading");
+        row.classList.add("failed");
+        row.innerHTML =
+          '<span class="up-name"></span><button type="button" class="chip-remove" title="Remove">×</button>';
+        row.querySelector(".up-name").textContent =
+          "⚠ " + file.name + " — " + (xhr.responseText || "HTTP " + xhr.status);
+      }
+      resolve();
+    });
+    xhr.addEventListener("error", function () {
+      row.classList.remove("uploading");
+      row.classList.add("failed");
+      var bar = row.querySelector(".up-bar");
+      if (bar) bar.remove();
+      row.querySelector(".up-name").textContent = "⚠ " + file.name + " — upload failed";
+      resolve();
+    });
+
+    var fd = new FormData();
+    fd.append("file", file);
+    xhr.send(fd);
+  });
+}
+
+document.addEventListener("change", function (e) {
+  var input = e.target.closest(".file-input");
+  if (!input || !input.files || !input.files.length) return;
+  var form = input.closest("form");
+  if (!form) return;
+  var chipsEl = form.querySelector(".attach-chips");
+  if (!chipsEl) return;
+
+  var files = Array.prototype.slice.call(input.files);
+  input.value = ""; // allow re-selecting the same file later
+
+  setUploading(form, files.length);
+  // Upload sequentially so progress bars fill one at a time.
+  files.reduce(function (chain, file) {
+    return chain.then(function () {
+      return uploadOne(form, chipsEl, file).then(function () {
+        setUploading(form, -1);
+      });
+    });
+  }, Promise.resolve());
 });
 
 // Re-localize timestamps and sync upload chips inside htmx-swapped fragments.

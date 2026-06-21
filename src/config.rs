@@ -16,8 +16,8 @@ pub struct Config {
     #[arg(long, env = "KSNOTES_DB_PATH", default_value = "ks-notes.db")]
     pub db_path: std::path::PathBuf,
 
-    /// Maximum upload size in MiB
-    #[arg(long, env = "KSNOTES_MAX_UPLOAD_MB", default_value_t = 32)]
+    /// Maximum upload size in MiB (0 = unlimited)
+    #[arg(long, env = "KSNOTES_MAX_UPLOAD_MB", default_value_t = 300)]
     pub max_upload_mb: usize,
 
     /// Set the Secure attribute on session cookies (enable when serving over HTTPS)

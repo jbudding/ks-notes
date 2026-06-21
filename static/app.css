@@ -241,6 +241,24 @@ a.cell:hover { outline: 1px solid var(--text-muted); outline-offset: 1px; }
 }
 .chip button { border: none; background: none; cursor: pointer; color: var(--text-muted); padding: 0; }
 
+/* Upload-in-progress chip: filename + a thin progress bar. */
+.chip.uploading { color: var(--text-muted); }
+.chip .up-bar {
+  width: 80px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.chip .up-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+.chip.failed { border-color: var(--danger); color: var(--danger); }
+
 /* ---------- Buttons & forms ---------- */
 
 button, .btn {

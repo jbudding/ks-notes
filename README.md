@@ -46,7 +46,7 @@ Open http://127.0.0.1:5230 — the first account you create is the admin.
 | `--bind` | `KSNOTES_BIND` | `127.0.0.1` | Listen address (use `0.0.0.0` to expose) |
 | `--port` | `KSNOTES_PORT` | `5230` | Listen port |
 | `--db-path` | `KSNOTES_DB_PATH` | `ks-notes.db` | SQLite file (parent dirs created) |
-| `--max-upload-mb` | `KSNOTES_MAX_UPLOAD_MB` | `32` | Request body / upload cap |
+| `--max-upload-mb` | `KSNOTES_MAX_UPLOAD_MB` | `300` | Request body / upload cap in MiB (`0` = unlimited) |
 | `--secure-cookies` | `KSNOTES_SECURE_COOKIES` | off | Set `Secure` on cookies (enable behind HTTPS) |
 
 Logging uses `RUST_LOG` (e.g. `RUST_LOG=debug`).
