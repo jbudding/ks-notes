@@ -1,0 +1,23 @@
+# ks-notes — paste onto any Intel (linux/amd64) host with Docker installed.
+#   docker compose up -d
+# Then open http://<host-ip>:5230 and create the first account (it becomes admin).
+services:
+  ks-notes:
+    image: ghcr.io/jbudding/ks-notes:latest
+    container_name: ks-notes
+    restart: unless-stopped
+    ports:
+      - "5230:5230"
+    environment:
+      KSNOTES_BIND: "0.0.0.0"
+      KSNOTES_PORT: "5230"
+      KSNOTES_DB_PATH: "/data/ks-notes.db"
+      KSNOTES_MAX_UPLOAD_MB: "32"
+      # Uncomment when serving over HTTPS (behind a reverse proxy):
+      # KSNOTES_SECURE_COOKIES: "1"
+      RUST_LOG: "info"
+    volumes:
+      - ks-notes-data:/data
+
+volumes:
+  ks-notes-data:
