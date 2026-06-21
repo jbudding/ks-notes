@@ -195,6 +195,8 @@ pub struct MemoQuery {
     pub feed: Feed,
     pub tag: Option<String>,
     pub search: Option<String>,
+    /// Half-open `[start, end)` created_at window (unix seconds) from the date filter.
+    pub created_range: Option<(i64, i64)>,
     pub before: Option<(i64, i64)>,
     pub limit: i64,
 }
@@ -247,6 +249,11 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
             wheres.push("m.id IN (SELECT rowid FROM memos_fts WHERE memos_fts MATCH ?)".into());
             binds.push(Value::Text(fts_query(search)));
         }
+        if let Some((start, end)) = query.created_range {
+            wheres.push("m.created_at >= ? AND m.created_at < ?".into());
+            binds.push(Value::Integer(start));
+            binds.push(Value::Integer(end));
+        }
         if let Some((ts, id)) = query.before {
             wheres.push("(m.created_at, m.id) < (?, ?)".into());
             binds.push(Value::Integer(ts));
@@ -257,7 +264,8 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
         // exclude pinned rows from that feed so they don't appear twice.
         let unfiltered_own = matches!(query.feed, Feed::Own(_))
             && query.tag.is_none()
-            && query.search.is_none();
+            && query.search.is_none()
+            && query.created_range.is_none();
         let pinned = if unfiltered_own && query.before.is_none() {
             let Feed::Own(user_id) = query.feed else {
                 unreachable!()
@@ -313,6 +321,31 @@ pub async fn tag_counts(pool: &Pool, user_id: i64) -> Result<Vec<TagCount>, AppE
                     tag: r.get(0)?,
                     count: r.get(1)?,
                 })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })
+    .await
+}
+
+/// Per-day note counts for the activity heatmap — the viewer's own active memos
+/// created since `since` (unix seconds). Days are bucketed in UTC, returned as
+/// `("YYYY-MM-DD", count)` rows; empty days are simply absent.
+pub async fn activity_since(
+    pool: &Pool,
+    user_id: i64,
+    since: i64,
+) -> Result<Vec<(String, i64)>, AppError> {
+    crate::db::run(pool, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT strftime('%Y-%m-%d', m.created_at, 'unixepoch') AS d, COUNT(*)
+             FROM memos m
+             WHERE m.user_id = ?1 AND m.state = 'normal' AND m.created_at >= ?2
+             GROUP BY d",
+        )?;
+        let rows = stmt
+            .query_map(params![user_id, since], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)

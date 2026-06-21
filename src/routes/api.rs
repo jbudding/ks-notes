@@ -96,6 +96,7 @@ pub async fn list_memos(
             feed,
             tag: p.tag.filter(|t| !t.is_empty()),
             search: p.q.filter(|q| !q.is_empty()),
+            created_range: None,
             before,
             limit,
         },

@@ -11,6 +11,8 @@ telemetry — one executable plus one SQLite file.
 - **Timeline UI** — composer at the top, reverse-chronological feed, infinite scroll,
   inline editing, pin and archive. Server-rendered HTML + [htmx](https://htmx.org);
   works fine with a tiny bit of vanilla JS on top.
+- **Activity heatmap & date filter** — a GitHub-style contribution grid over the last
+  year, plus a month picker; click any day or pick a month to filter the feed.
 - **#tags** — parsed from memo text (code blocks excluded), with a sidebar filter and counts.
 - **Full-text search** — SQLite FTS5, live as you type.
 - **Visibility & sharing** — `private` / `protected` (any signed-in user) / `public`;

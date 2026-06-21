@@ -6,6 +6,6 @@
 {% endif %}
 {% if let Some(b) = next_before %}
 <div class="load-sentinel"
-     hx-get="{{ feed_path }}?before={{ b }}{% if let Some(t) = tag_filter %}&tag={{ t|urlencode }}{% endif %}{% if let Some(qq) = q %}&q={{ qq|urlencode }}{% endif %}"
+     hx-get="{{ feed_path }}?before={{ b }}{% if let Some(t) = tag_filter %}&tag={{ t|urlencode }}{% endif %}{% if let Some(qq) = q %}&q={{ qq|urlencode }}{% endif %}{% if let Some(d) = date_filter %}&date={{ d|urlencode }}{% endif %}"
      hx-trigger="revealed" hx-swap="outerHTML">Loading…</div>
 {% endif %}

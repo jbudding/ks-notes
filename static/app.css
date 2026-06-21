@@ -106,19 +106,96 @@ a:hover { text-decoration: underline; }
   .sidebar { position: static; }
 }
 
-/* ---------- Search ---------- */
+/* ---------- Search & filter controls ---------- */
+
+.feed-controls {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
 
 .search-box {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   font-size: 0.95em;
-  margin-bottom: 14px;
 }
 .search-box:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+.month-filter {
+  flex: 0 0 auto;
+  font-size: 0.95em;
+  color: var(--text-muted);
+}
+.month-filter:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+/* ---------- Activity heatmap ---------- */
+
+.activity {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.activity-head { color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px; }
+.activity-head strong { color: var(--text); }
+
+.activity-scroll { overflow-x: auto; padding-bottom: 4px; }
+
+.activity-matrix { display: inline-block; }
+
+.activity-months {
+  display: grid;
+  grid-template-columns: repeat(var(--weeks), 12px);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+.activity-months span {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.activity-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--weeks), 12px);
+  grid-template-rows: repeat(7, 12px);
+  grid-auto-flow: column;
+  gap: 3px;
+}
+
+.cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: block;
+  background: var(--border);
+}
+.cell.empty { background: transparent; }
+a.cell { cursor: pointer; }
+a.cell:hover { outline: 1px solid var(--text-muted); outline-offset: 1px; }
+
+.lvl-0 { background: var(--border); }
+.lvl-1 { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); }
+.lvl-2 { background: color-mix(in srgb, var(--accent) 55%, var(--surface)); }
+.lvl-3 { background: color-mix(in srgb, var(--accent) 78%, var(--surface)); }
+.lvl-4 { background: var(--accent); }
+
+.activity-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  justify-content: flex-end;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.activity-legend span:first-child { margin-right: 2px; }
+.activity-legend span:last-child { margin-left: 2px; }
 
 /* ---------- Composer ---------- */
 
@@ -194,7 +271,7 @@ button:hover, .btn:hover { border-color: var(--text-muted); }
 .btn-ghost:hover { color: var(--text); }
 .btn-danger { color: var(--danger); }
 
-select, input[type="text"], input[type="password"] {
+select, input[type="text"], input[type="password"], input[type="month"] {
   font: inherit;
   padding: 7px 10px;
   border: 1px solid var(--border);

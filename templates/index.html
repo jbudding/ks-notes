@@ -8,11 +8,31 @@
 <div class="app">
   {% include "partials/sidebar.html" %}
   <main>
-    <input class="search-box" type="search" name="q" placeholder="Search memos…"
-           value="{% if let Some(qq) = q %}{{ qq }}{% endif %}"
-           hx-get="{{ feed_path }}" hx-trigger="input changed delay:300ms, search"
-           hx-target="#memo-list" hx-push-url="true"
-           {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+    {% if let Some(act) = activity %}
+    <section class="activity card">
+      <div class="activity-head">
+        <strong>{{ act.total }}</strong> note{% if act.total != 1 %}s{% endif %} in the last year
+      </div>
+      {% include "partials/activity_matrix.html" %}
+    </section>
+    {% endif %}
+
+    <div class="feed-controls">
+      <input class="search-box" type="search" name="q" placeholder="Search memos…"
+             value="{% if let Some(qq) = q %}{{ qq }}{% endif %}"
+             hx-get="{{ feed_path }}" hx-trigger="input changed delay:300ms, search"
+             hx-target="#memo-list" hx-push-url="true" hx-include=".month-filter"
+             {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+      <input class="month-filter" type="month" name="date" aria-label="Filter by month"
+             value="{% if let Some(d) = date_filter %}{{ d }}{% endif %}"
+             hx-get="{{ feed_path }}" hx-trigger="change"
+             hx-target="#memo-list" hx-push-url="true" hx-include=".search-box"
+             {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+    </div>
+
+    {% if let Some(d) = date_filter %}
+    <p class="muted">Showing notes from <strong>{{ d }}</strong> — <a href="{{ feed_path }}">clear</a></p>
+    {% endif %}
 
     {% if show_composer %}
     <form class="composer" hx-post="/memos" hx-target="#memo-feed" hx-swap="afterbegin"

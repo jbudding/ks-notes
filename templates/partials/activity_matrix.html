@@ -1,0 +1,28 @@
+<div class="activity-scroll">
+  <div class="activity-matrix" style="--weeks: {{ act.weeks }}">
+    <div class="activity-months">
+      {% for m in act.months %}<span>{{ m.name }}</span>{% endfor %}
+    </div>
+    <div class="activity-grid">
+      {% for c in act.cells %}
+      {%- if c.date.is_empty() -%}
+      <span class="cell empty"></span>
+      {%- else -%}
+      <a class="cell lvl-{{ c.level }}" title="{{ c.label }}"
+         href="{{ feed_path }}?date={{ c.date }}"
+         hx-get="{{ feed_path }}?date={{ c.date }}"
+         hx-target="#memo-list" hx-push-url="true"></a>
+      {%- endif -%}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+<div class="activity-legend">
+  <span>Less</span>
+  <span class="cell lvl-0"></span>
+  <span class="cell lvl-1"></span>
+  <span class="cell lvl-2"></span>
+  <span class="cell lvl-3"></span>
+  <span class="cell lvl-4"></span>
+  <span>More</span>
+</div>
