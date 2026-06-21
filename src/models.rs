@@ -88,6 +88,10 @@ pub struct Memo {
 /// children of their note, which is deduped by `uuid`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportAttachment {
+    /// The resource uid the note's `{{attach:UID}}` token refers to. Absent in
+    /// v1/v2 files (block attachments) — import then appends a fresh token.
+    #[serde(default)]
+    pub uid: String,
     pub filename: String,
     pub content_type: String,
     pub created_at: i64,

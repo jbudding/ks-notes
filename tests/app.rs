@@ -462,9 +462,8 @@ async fn upload_above_default_body_limit() {
     );
 }
 
-// An existing attachment must be visible while editing the memo — the edit form
-// renders m.attachments, not just the empty new-upload chip area. Regression for
-// attachments disappearing from the editor until Save was pressed.
+// With inline attachments the editor just shows the raw content, so the
+// `{{attach:uid}}` token must be present in the edit textarea.
 #[tokio::test]
 async fn edit_form_shows_existing_attachments() {
     let dir = tempfile::tempdir().unwrap();
@@ -487,12 +486,13 @@ async fn edit_form_shows_existing_attachments() {
     assert_eq!(resp.status(), StatusCode::OK);
     let edit = body_text(resp).await;
     assert!(
-        edit.contains(&format!("data-uid=\"{uid}\"")),
-        "edit form should show the existing attachment as a chip, got:\n{edit}"
+        edit.contains(&format!("{{{{attach:{uid}}}}}")),
+        "edit form textarea should contain the inline attachment token, got:\n{edit}"
     );
 }
 
-/// Upload a file, create a memo attaching it, and return (memo id, resource uid).
+/// Upload a file and create a memo referencing it inline via `{{attach:uid}}`.
+/// Returns (memo id, resource uid).
 async fn memo_with_attachment(app: &Router, s: &Session) -> (String, String) {
     let resp = app.clone().oneshot(upload_req(s, 1024)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -504,22 +504,7 @@ async fn memo_with_attachment(app: &Router, s: &Session) -> (String, String) {
         .expect("uid in upload chip")
         .to_string();
 
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::post("/memos")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .header(header::COOKIE, &s.cookie)
-                .header("X-CSRF-Token", &s.csrf)
-                .body(Body::from(format!(
-                    "content=has+attachment&visibility=private&resources={uid}"
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let card = body_text(resp).await;
+    let card = create_memo(app, s, &format!("see this {{{{attach:{uid}}}}}"), "private").await;
     let id = card
         .split("id=\"memo-")
         .nth(1)
@@ -529,7 +514,7 @@ async fn memo_with_attachment(app: &Router, s: &Session) -> (String, String) {
     (id, uid)
 }
 
-async fn edit_memo(app: &Router, s: &Session, id: &str, resources: &str) -> axum::response::Response {
+async fn edit_memo(app: &Router, s: &Session, id: &str, content: &str) -> axum::response::Response {
     app.clone()
         .oneshot(
             Request::put(format!("/memos/{id}"))
@@ -537,7 +522,8 @@ async fn edit_memo(app: &Router, s: &Session, id: &str, resources: &str) -> axum
                 .header(header::COOKIE, &s.cookie)
                 .header("X-CSRF-Token", &s.csrf)
                 .body(Body::from(format!(
-                    "content=has+attachment&visibility=private&resources={resources}"
+                    "content={}&visibility=private",
+                    urlencode(content)
                 )))
                 .unwrap(),
         )
@@ -545,8 +531,8 @@ async fn edit_memo(app: &Router, s: &Session, id: &str, resources: &str) -> axum
         .unwrap()
 }
 
-// Editing a memo reconciles its attachments to the submitted set: keeping the uid
-// preserves the file, dropping it deletes the blob (404 thereafter).
+// Attachments follow the inline token: keeping `{{attach:uid}}` in the content
+// preserves the file; removing the token deletes the blob (404 thereafter).
 #[tokio::test]
 async fn edit_reconciles_attachments() {
     let dir = tempfile::tempdir().unwrap();
@@ -554,9 +540,9 @@ async fn edit_reconciles_attachments() {
     let s = register(&app, "dave", "password123").await.unwrap();
     let (id, uid) = memo_with_attachment(&app, &s).await;
 
-    // Saving with the uid still present keeps the attachment.
-    let card = body_text(edit_memo(&app, &s, &id, &uid).await).await;
-    assert!(card.contains(&format!("/r/{uid}")), "attachment should survive a save that keeps it");
+    // Saving with the token still present keeps the attachment.
+    let card = body_text(edit_memo(&app, &s, &id, &format!("kept {{{{attach:{uid}}}}}")).await).await;
+    assert!(card.contains(&format!("/r/{uid}")), "attachment should survive a save that keeps the token");
     let resp = app
         .clone()
         .oneshot(
@@ -569,8 +555,8 @@ async fn edit_reconciles_attachments() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Saving with no resources removes it: gone from the card and the blob 404s.
-    let card = body_text(edit_memo(&app, &s, &id, "").await).await;
+    // Saving without the token removes it: gone from the card and the blob 404s.
+    let card = body_text(edit_memo(&app, &s, &id, "no attachment now").await).await;
     assert!(!card.contains(&format!("/r/{uid}")), "removed attachment should be gone from the card");
     let resp = app
         .clone()
@@ -713,7 +699,7 @@ async fn export_import_round_trips_attachments() {
     let app = test_app(&dir);
     let alice = register(&app, "alice", "password123").await.unwrap();
 
-    // Upload a 1 KiB file and attach it to a tagged memo.
+    // Upload a 1 KiB file and reference it inline in a tagged memo.
     let chip = body_text(app.clone().oneshot(upload_req(&alice, 1024)).await.unwrap()).await;
     let uid = chip
         .split("data-uid=\"")
@@ -721,27 +707,17 @@ async fn export_import_round_trips_attachments() {
         .and_then(|s| s.split('"').next())
         .unwrap()
         .to_string();
-    app.clone()
-        .oneshot(
-            Request::post("/memos")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .header(header::COOKIE, &alice.cookie)
-                .header("X-CSRF-Token", &alice.csrf)
-                .body(Body::from(format!(
-                    "content=report+%23work&visibility=private&resources={uid}"
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    create_memo(&app, &alice, &format!("report #work {{{{attach:{uid}}}}}"), "private").await;
 
-    // Export #work — the JSON must carry the attachment with non-empty base64.
+    // Export #work — the JSON must carry the attachment (with its uid) and base64.
     let json = body_text(app.clone().oneshot(export_req(&alice, &["work"])).await.unwrap()).await;
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["version"], 2);
+    assert_eq!(parsed["version"], 3);
     let att = &parsed["notes"][0]["attachments"][0];
     assert_eq!(att["filename"], "big.bin");
+    assert_eq!(att["uid"], uid, "attachment carries its uid for token remap");
     assert!(!att["data"].as_str().unwrap().is_empty(), "base64 data present");
+    assert!(parsed["notes"][0]["content"].as_str().unwrap().contains(&format!("{{{{attach:{uid}}}}}")));
 
     // Import into bob; the attachment is recreated and serves the same bytes.
     open_registration(&app, &alice).await;

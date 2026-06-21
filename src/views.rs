@@ -20,13 +20,6 @@ pub struct MemoView {
     pub created_iso: String,
     pub created_display: String,
     pub can_edit: bool,
-    pub attachments: Vec<AttachmentView>,
-}
-
-pub struct AttachmentView {
-    pub uid: String,
-    pub filename: String,
-    pub is_image: bool,
 }
 
 /// Human-readable attachment size limit for the composer's paperclip tooltip.
@@ -51,26 +44,26 @@ pub fn format_times(ts: i64) -> (String, String) {
 
 pub fn memo_view(memo: &Memo, viewer: Option<&User>, attachments: Vec<ResourceMeta>) -> MemoView {
     let (created_iso, created_display) = format_times(memo.created_at);
+    let inline: Vec<crate::markdown::InlineAttachment> = attachments
+        .into_iter()
+        .map(|r| crate::markdown::InlineAttachment {
+            uid: r.uid,
+            filename: r.filename,
+            is_image: r.content_type.starts_with("image/"),
+        })
+        .collect();
     MemoView {
         id: memo.id,
         uid: memo.uid.clone(),
         username: memo.username.clone(),
         raw: memo.content.clone(),
-        html: crate::markdown::render(&memo.content),
+        html: crate::markdown::render_with_attachments(&memo.content, &inline),
         visibility: memo.visibility.as_str(),
         pinned: memo.pinned,
         archived: memo.state == MemoState::Archived,
         created_iso,
         created_display,
         can_edit: viewer.map(|u| u.id == memo.user_id).unwrap_or(false),
-        attachments: attachments
-            .into_iter()
-            .map(|r| AttachmentView {
-                uid: r.uid,
-                filename: r.filename,
-                is_image: r.content_type.starts_with("image/"),
-            })
-            .collect(),
     }
 }
 

@@ -116,6 +116,15 @@ ALTER TABLE memos ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'
   CHECK (origin IN ('local','imported'));
 CREATE INDEX idx_memos_origin ON memos(user_id, origin, state, created_at DESC);
 "#,
+    // 003 — inline attachments. Existing attachments were rendered as a block
+    // below the note; now they're referenced by `{{attach:UID}}` tokens in the
+    // content. Backfill a token per existing attachment so they keep showing.
+    r#"
+UPDATE memos SET content = content ||
+  (SELECT group_concat(char(10) || char(10) || '{{attach:' || r.uid || '}}', '')
+   FROM resources r WHERE r.memo_id = memos.id)
+WHERE id IN (SELECT memo_id FROM resources WHERE memo_id IS NOT NULL);
+"#,
 ];
 
 /// Open the database directly (pre-pool), enable WAL, and apply pending migrations.

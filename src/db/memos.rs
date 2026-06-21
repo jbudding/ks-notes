@@ -98,11 +98,11 @@ pub async fn create(
     user_id: i64,
     content: String,
     visibility: Visibility,
-    resource_uids: Vec<String>,
 ) -> Result<Memo, AppError> {
     let uid = crate::auth::new_uid();
     let uuid = crate::auth::new_uuid();
     crate::db::run(pool, move |conn| {
+        let resource_uids = crate::markdown::extract_attachment_refs(&content);
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO memos (uid, uuid, user_id, content, visibility) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -125,9 +125,9 @@ pub async fn update(
     user_id: i64,
     content: String,
     visibility: Visibility,
-    resource_uids: Vec<String>,
 ) -> Result<Memo, AppError> {
     crate::db::run(pool, move |conn| {
+        let resource_uids = crate::markdown::extract_attachment_refs(&content);
         let tx = conn.transaction()?;
         let changed = tx.execute(
             "UPDATE memos SET content = ?1, visibility = ?2, updated_at = unixepoch()
@@ -450,18 +450,20 @@ pub async fn export_by_tags(
             .collect::<Result<Vec<_>, _>>()?;
 
         // Pull each note's attachments (with blob data) and base64 them inline.
+        // `uid` lets import remap the note's {{attach:UID}} tokens to new ids.
         let mut att_stmt = conn.prepare(
-            "SELECT filename, content_type, created_at, data
+            "SELECT uid, filename, content_type, created_at, data
              FROM resources WHERE memo_id = ?1 ORDER BY id",
         )?;
         for (id, note) in &mut rows {
             note.attachments = att_stmt
                 .query_map([*id], |r| {
                     Ok(ExportAttachment {
-                        filename: r.get(0)?,
-                        content_type: r.get(1)?,
-                        created_at: r.get(2)?,
-                        data: BASE64.encode(&r.get::<_, Vec<u8>>(3)?),
+                        uid: r.get(0)?,
+                        filename: r.get(1)?,
+                        content_type: r.get(2)?,
+                        created_at: r.get(3)?,
+                        data: BASE64.encode(&r.get::<_, Vec<u8>>(4)?),
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -472,12 +474,13 @@ pub async fn export_by_tags(
     .await
 }
 
-/// Insert one imported attachment row, attached to `memo_id` and owned by
-/// `user_id`. Returns whether the base64 decoded successfully.
+/// Insert one imported attachment row under `uid`, attached to `memo_id` and
+/// owned by `user_id`. Returns whether the base64 decoded successfully.
 fn insert_imported_attachment(
     conn: &Connection,
     memo_id: i64,
     user_id: i64,
+    uid: &str,
     att: &ExportAttachment,
 ) -> Result<bool, AppError> {
     let Ok(bytes) = BASE64.decode(att.data.as_bytes()) else {
@@ -488,7 +491,7 @@ fn insert_imported_attachment(
         "INSERT INTO resources (uid, user_id, memo_id, filename, content_type, size, data, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
-            crate::auth::new_uid(),
+            uid,
             user_id,
             memo_id,
             att.filename,
@@ -529,6 +532,22 @@ pub async fn import_notes(
                 continue;
             }
 
+            // Attachments get fresh uids here, so rewrite the note's tokens to
+            // match. A v1/v2 attachment (no uid / no token) gets a token appended.
+            let mut final_content = content.to_string();
+            let mut planned: Vec<(String, &ExportAttachment)> = Vec::new();
+            for att in &note.attachments {
+                let new_uid = crate::auth::new_uid();
+                let new_token = format!("{{{{attach:{new_uid}}}}}");
+                let old_token = format!("{{{{attach:{}}}}}", att.uid);
+                if !att.uid.is_empty() && final_content.contains(&old_token) {
+                    final_content = final_content.replace(&old_token, &new_token);
+                } else {
+                    final_content.push_str(&format!("\n\n{new_token}"));
+                }
+                planned.push((new_uid, att));
+            }
+
             // Existing note with this uuid, if any (origin + freshness decide the action).
             let existing: Option<(i64, String, i64)> = tx
                 .query_row(
@@ -549,18 +568,18 @@ pub async fn import_notes(
                                  created_at = ?3, updated_at = ?4
                              WHERE id = ?5",
                             params![
-                                content,
+                                final_content,
                                 note.visibility,
                                 note.created_at,
                                 note.updated_at,
                                 id
                             ],
                         )?;
-                        sync_tags(&tx, id, content)?;
+                        sync_tags(&tx, id, &final_content)?;
                         // Replace attachments wholesale with the incoming set.
                         tx.execute("DELETE FROM resources WHERE memo_id = ?1", params![id])?;
-                        for att in &note.attachments {
-                            insert_imported_attachment(&tx, id, user_id, att)?;
+                        for (uid, att) in &planned {
+                            insert_imported_attachment(&tx, id, user_id, uid, att)?;
                         }
                         summary.updated += 1;
                     } else {
@@ -576,16 +595,16 @@ pub async fn import_notes(
                             crate::auth::new_uid(),
                             note.uuid,
                             user_id,
-                            content,
+                            final_content,
                             note.visibility,
                             note.created_at,
                             note.updated_at
                         ],
                     )?;
                     let id = tx.last_insert_rowid();
-                    sync_tags(&tx, id, content)?;
-                    for att in &note.attachments {
-                        insert_imported_attachment(&tx, id, user_id, att)?;
+                    sync_tags(&tx, id, &final_content)?;
+                    for (uid, att) in &planned {
+                        insert_imported_attachment(&tx, id, user_id, uid, att)?;
                     }
                     summary.inserted += 1;
                 }

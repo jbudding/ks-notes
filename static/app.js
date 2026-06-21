@@ -49,33 +49,11 @@ document.addEventListener("DOMContentLoaded", function () {
   localizeTimes(document);
 });
 
-// Keep the hidden `resources` field in sync with the finished upload chips.
-function syncResources(chipsEl) {
-  var form = chipsEl.closest("form");
-  if (!form) return;
-  var hidden = form.querySelector(".resource-uids");
-  if (hidden) {
-    var uids = [];
-    chipsEl.querySelectorAll(".chip[data-uid]").forEach(function (c) {
-      uids.push(c.getAttribute("data-uid"));
-    });
-    hidden.value = uids.join(" ");
-  }
-}
-
-document.addEventListener("click", function (e) {
-  var rm = e.target.closest(".chip-remove");
-  if (rm) {
-    var chips = rm.closest(".attach-chips");
-    rm.closest(".chip").remove();
-    if (chips) syncResources(chips);
-  }
-});
-
-// --- Per-file uploads with a progress bar -----------------------------------
-// Each selected file uploads on its own request to /resources, in order, so the
-// user sees a progress bar per file. The server returns a chip fragment (with
-// data-uid) that replaces the progress row once the file lands.
+// --- Inline attachments ------------------------------------------------------
+// Selecting files uploads each to /resources; on success a {{attach:UID}} token
+// is placed in the note at the cursor (the "attachment point"), so attachments
+// live inline with text above and below. An in-flight placeholder token shows
+// progress and is swapped for the real one when the upload lands.
 
 function csrfToken() {
   try {
@@ -94,42 +72,55 @@ function setUploading(form, delta) {
   if (save) save.disabled = n > 0;
 }
 
-function uploadOne(form, chipsEl, file) {
-  return new Promise(function (resolve) {
-    var row = document.createElement("span");
-    row.className = "chip uploading";
-    row.innerHTML =
-      '<span class="up-name"></span><span class="up-bar"><i class="up-fill"></i></span>';
-    row.querySelector(".up-name").textContent = "📎 " + file.name;
-    chipsEl.appendChild(row);
-    var fill = row.querySelector(".up-fill");
+// Replace `find` with `replacement` in the textarea, keeping it tidy.
+function replaceInTextarea(ta, find, replacement) {
+  var i = ta.value.indexOf(find);
+  if (i < 0) return;
+  ta.value = ta.value.slice(0, i) + replacement + ta.value.slice(i + find.length);
+}
 
+// Place `text` at the cursor, or into the first empty `{{attach}}` placeholder
+// if one exists. Surrounds the token with blank lines so it renders as a block.
+function placeAttachment(ta, text) {
+  var block = "\n\n" + text + "\n\n";
+  if (ta.value.indexOf("{{attach}}") >= 0) {
+    replaceInTextarea(ta, "{{attach}}", text);
+    return;
+  }
+  var start = ta.selectionStart || 0;
+  var end = ta.selectionEnd || start;
+  ta.value = ta.value.slice(0, start) + block + ta.value.slice(end);
+  var pos = start + block.length;
+  try {
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+  } catch (_) {}
+}
+
+function uploadOne(ta, file, nonce) {
+  // A unique placeholder token marks where this upload will land.
+  var placeholder = "{{attach:uploading-" + nonce + "}}";
+  placeAttachment(ta, "⏳ " + file.name + " " + placeholder);
+
+  return new Promise(function (resolve) {
+    var marker = "⏳ " + file.name + " " + placeholder;
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "/resources");
     xhr.setRequestHeader("X-CSRF-Token", csrfToken());
-    xhr.upload.addEventListener("progress", function (e) {
-      if (e.lengthComputable) fill.style.width = Math.round((e.loaded / e.total) * 100) + "%";
-    });
     xhr.addEventListener("load", function () {
       if (xhr.status >= 200 && xhr.status < 300) {
-        row.outerHTML = xhr.responseText; // becomes a real .chip[data-uid]
-        syncResources(chipsEl);
+        var m = xhr.responseText.match(/data-uid="([^"]+)"/);
+        var uid = m ? m[1] : "";
+        replaceInTextarea(ta, marker, uid ? "{{attach:" + uid + "}}" : "");
       } else {
-        row.classList.remove("uploading");
-        row.classList.add("failed");
-        row.innerHTML =
-          '<span class="up-name"></span><button type="button" class="chip-remove" title="Remove">×</button>';
-        row.querySelector(".up-name").textContent =
-          "⚠ " + file.name + " — " + (xhr.responseText || "HTTP " + xhr.status);
+        replaceInTextarea(ta, marker, "");
+        alert("Upload failed for " + file.name + ": " + (xhr.responseText || "HTTP " + xhr.status));
       }
       resolve();
     });
     xhr.addEventListener("error", function () {
-      row.classList.remove("uploading");
-      row.classList.add("failed");
-      var bar = row.querySelector(".up-bar");
-      if (bar) bar.remove();
-      row.querySelector(".up-name").textContent = "⚠ " + file.name + " — upload failed";
+      replaceInTextarea(ta, marker, "");
+      alert("Upload failed for " + file.name);
       resolve();
     });
 
@@ -144,29 +135,26 @@ document.addEventListener("change", function (e) {
   if (!input || !input.files || !input.files.length) return;
   var form = input.closest("form");
   if (!form) return;
-  var chipsEl = form.querySelector(".attach-chips");
-  if (!chipsEl) return;
+  var ta = form.querySelector("textarea[name=content]");
+  if (!ta) return;
 
   var files = Array.prototype.slice.call(input.files);
   input.value = ""; // allow re-selecting the same file later
 
   setUploading(form, files.length);
-  // Upload sequentially so progress bars fill one at a time.
-  files.reduce(function (chain, file) {
+  // Upload sequentially so the inline tokens land in selection order.
+  files.reduce(function (chain, file, idx) {
     return chain.then(function () {
-      return uploadOne(form, chipsEl, file).then(function () {
+      return uploadOne(ta, file, Date.now() + "-" + idx).then(function () {
         setUploading(form, -1);
       });
     });
   }, Promise.resolve());
 });
 
-// Re-localize timestamps and sync upload chips inside htmx-swapped fragments.
+// Re-localize timestamps inside htmx-swapped fragments.
 document.body.addEventListener("htmx:afterSwap", function (e) {
   localizeTimes(e.target);
-  if (e.target.classList && e.target.classList.contains("attach-chips")) {
-    syncResources(e.target);
-  }
 });
 
 // Give the Save button immediate feedback while the form request is in flight:

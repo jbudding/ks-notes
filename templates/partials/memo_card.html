@@ -31,15 +31,4 @@
     {% endif %}
   </div>
   <div class="memo-content">{{ m.html|safe }}</div>
-  {% if !m.attachments.is_empty() %}
-  <div class="memo-attachments">
-    {% for a in m.attachments %}
-    {% if a.is_image %}
-    <a href="/r/{{ a.uid }}" target="_blank"><img src="/r/{{ a.uid }}" alt="{{ a.filename }}" loading="lazy"></a>
-    {% else %}
-    <a class="chip" href="/r/{{ a.uid }}" target="_blank">📎 {{ a.filename }}</a>
-    {% endif %}
-    {% endfor %}
-  </div>
-  {% endif %}
 </article>

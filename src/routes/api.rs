@@ -140,7 +140,7 @@ pub async fn create_memo(
         .as_deref()
         .and_then(Visibility::parse)
         .unwrap_or(Visibility::Private);
-    let memo = db::memos::create(&state.pool, user.id, content, visibility, Vec::new()).await?;
+    let memo = db::memos::create(&state.pool, user.id, content, visibility).await?;
     Ok((StatusCode::CREATED, Json(ApiMemo::from(memo))).into_response())
 }
 
@@ -196,7 +196,7 @@ pub async fn patch_memo(
             .as_deref()
             .and_then(Visibility::parse)
             .unwrap_or(memo.visibility);
-        db::memos::update(&state.pool, memo.id, user.id, content, visibility, Vec::new()).await?;
+        db::memos::update(&state.pool, memo.id, user.id, content, visibility).await?;
     }
     if let Some(pinned) = body.pinned
         && pinned != memo.pinned

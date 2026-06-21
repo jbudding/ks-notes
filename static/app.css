@@ -376,6 +376,16 @@ label { display: block; margin: 12px 0 4px; font-weight: 500; }
 
 .memo-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .memo-attachments img { max-height: 220px; max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+/* Inline attachments rendered from {{attach:uid}} tokens within memo content. */
+.memo-content img.inline-attachment {
+  max-height: 360px;
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+  margin: 8px 0;
+}
+.memo-content a.chip { text-decoration: none; }
 
 .memo-editor textarea {
   min-height: 110px;

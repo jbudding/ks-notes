@@ -1,12 +1,6 @@
 <article class="memo-card memo-editor" id="memo-{{ m.id }}">
   <form hx-put="/memos/{{ m.id }}" hx-target="closest .memo-card" hx-swap="outerHTML">
     <textarea name="content" required>{{ m.raw }}</textarea>
-    <input type="hidden" name="resources" value="{% for a in m.attachments %}{{ a.uid }} {% endfor %}" class="resource-uids">
-    <div class="attach-chips">
-      {% for a in m.attachments %}
-      <span class="chip" data-uid="{{ a.uid }}">📎 {{ a.filename }}<button type="button" class="chip-remove" title="Remove">×</button></span>
-      {% endfor %}
-    </div>
     <div class="composer-bar">
       <label class="btn-ghost" title="Attach files ({{ upload_limit }})">
         📎<input type="file" name="file" multiple hidden class="file-input">

@@ -37,11 +37,11 @@ struct TagSidebarOob {
 pub struct MemoForm {
     content: String,
     visibility: Option<String>,
-    /// Space-separated resource uids accumulated by the composer.
-    resources: Option<String>,
 }
 
-fn parse_form(form: &MemoForm) -> Result<(String, Visibility, Vec<String>), AppError> {
+/// Attachments are derived from `{{attach:uid}}` tokens in the content itself,
+/// so there's no separate resource list to parse here.
+fn parse_form(form: &MemoForm) -> Result<(String, Visibility), AppError> {
     let content = form.content.trim().to_string();
     if content.is_empty() {
         return Err(AppError::BadRequest("Memo content can't be empty".into()));
@@ -54,14 +54,7 @@ fn parse_form(form: &MemoForm) -> Result<(String, Visibility, Vec<String>), AppE
         .as_deref()
         .and_then(Visibility::parse)
         .unwrap_or(Visibility::Private);
-    let resources = form
-        .resources
-        .as_deref()
-        .unwrap_or_default()
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    Ok((content, visibility, resources))
+    Ok((content, visibility))
 }
 
 async fn card_view(state: &AppState, memo: &Memo, viewer: &crate::models::User) -> Result<MemoView, AppError> {
@@ -94,9 +87,8 @@ pub async fn create(
     CsrfGuard(session): CsrfGuard,
     Form(form): Form<MemoForm>,
 ) -> Result<Response, AppError> {
-    let (content, visibility, resources) = parse_form(&form)?;
-    let memo =
-        db::memos::create(&state.pool, session.user.id, content, visibility, resources).await?;
+    let (content, visibility) = parse_form(&form)?;
+    let memo = db::memos::create(&state.pool, session.user.id, content, visibility).await?;
     card_with_sidebar(&state, &memo, &session.user).await
 }
 
@@ -106,16 +98,8 @@ pub async fn update(
     CsrfGuard(session): CsrfGuard,
     Form(form): Form<MemoForm>,
 ) -> Result<Response, AppError> {
-    let (content, visibility, resources) = parse_form(&form)?;
-    let memo = db::memos::update(
-        &state.pool,
-        id,
-        session.user.id,
-        content,
-        visibility,
-        resources,
-    )
-    .await?;
+    let (content, visibility) = parse_form(&form)?;
+    let memo = db::memos::update(&state.pool, id, session.user.id, content, visibility).await?;
     card_with_sidebar(&state, &memo, &session.user).await
 }
 

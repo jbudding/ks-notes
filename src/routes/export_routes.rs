@@ -71,7 +71,7 @@ pub async fn download(
     }
 
     let notes = db::memos::export_by_tags(&state.pool, session.user.id, tags).await?;
-    let file = ExportFile { version: 2, notes };
+    let file = ExportFile { version: 3, notes };
     let json = serde_json::to_string_pretty(&file)
         .map_err(|e| AppError::Internal(format!("serializing export: {e}")))?;
 
