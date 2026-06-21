@@ -61,6 +61,34 @@ fn attach_resources(
     Ok(())
 }
 
+/// Reconcile a memo's attachments to exactly `resource_uids`: claim newly
+/// uploaded resources and delete the ones the editor dropped. Owner-scoped, so
+/// only this user's resources on this memo are ever removed.
+fn set_resources(
+    conn: &Connection,
+    memo_id: i64,
+    user_id: i64,
+    resource_uids: &[String],
+) -> Result<(), AppError> {
+    attach_resources(conn, memo_id, user_id, resource_uids)?;
+
+    if resource_uids.is_empty() {
+        conn.execute(
+            "DELETE FROM resources WHERE memo_id = ?1 AND user_id = ?2",
+            params![memo_id, user_id],
+        )?;
+    } else {
+        let placeholders = vec!["?"; resource_uids.len()].join(",");
+        let sql = format!(
+            "DELETE FROM resources WHERE memo_id = ? AND user_id = ? AND uid NOT IN ({placeholders})"
+        );
+        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&memo_id, &user_id];
+        binds.extend(resource_uids.iter().map(|u| u as &dyn rusqlite::ToSql));
+        conn.execute(&sql, params_from_iter(binds))?;
+    }
+    Ok(())
+}
+
 pub async fn create(
     pool: &Pool,
     user_id: i64,
@@ -105,7 +133,7 @@ pub async fn update(
             return Err(AppError::NotFound);
         }
         sync_tags(&tx, memo_id, &content)?;
-        attach_resources(&tx, memo_id, user_id, &resource_uids)?;
+        set_resources(&tx, memo_id, user_id, &resource_uids)?;
         let memo = get_by_id_sync(&tx, memo_id)?;
         tx.commit()?;
         Ok(memo)

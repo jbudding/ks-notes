@@ -461,3 +461,126 @@ async fn upload_above_default_body_limit() {
         "upload over the cap should be rejected"
     );
 }
+
+// An existing attachment must be visible while editing the memo — the edit form
+// renders m.attachments, not just the empty new-upload chip area. Regression for
+// attachments disappearing from the editor until Save was pressed.
+#[tokio::test]
+async fn edit_form_shows_existing_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "carol", "password123").await.unwrap();
+    let (id, uid) = memo_with_attachment(&app, &s).await;
+
+    // The edit form must render the attachment as a removable chip.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/memos/{id}/edit"))
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let edit = body_text(resp).await;
+    assert!(
+        edit.contains(&format!("data-uid=\"{uid}\"")),
+        "edit form should show the existing attachment as a chip, got:\n{edit}"
+    );
+}
+
+/// Upload a file, create a memo attaching it, and return (memo id, resource uid).
+async fn memo_with_attachment(app: &Router, s: &Session) -> (String, String) {
+    let resp = app.clone().oneshot(upload_req(s, 1024)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let chip = body_text(resp).await;
+    let uid = chip
+        .split("data-uid=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect("uid in upload chip")
+        .to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/memos")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::from(format!(
+                    "content=has+attachment&visibility=private&resources={uid}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let card = body_text(resp).await;
+    let id = card
+        .split("id=\"memo-")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect("memo id in card")
+        .to_string();
+    (id, uid)
+}
+
+async fn edit_memo(app: &Router, s: &Session, id: &str, resources: &str) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::put(format!("/memos/{id}"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::from(format!(
+                    "content=has+attachment&visibility=private&resources={resources}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+// Editing a memo reconciles its attachments to the submitted set: keeping the uid
+// preserves the file, dropping it deletes the blob (404 thereafter).
+#[tokio::test]
+async fn edit_reconciles_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "dave", "password123").await.unwrap();
+    let (id, uid) = memo_with_attachment(&app, &s).await;
+
+    // Saving with the uid still present keeps the attachment.
+    let card = body_text(edit_memo(&app, &s, &id, &uid).await).await;
+    assert!(card.contains(&format!("/r/{uid}")), "attachment should survive a save that keeps it");
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/r/{uid}"))
+                .header(header::COOKIE, &s.cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Saving with no resources removes it: gone from the card and the blob 404s.
+    let card = body_text(edit_memo(&app, &s, &id, "").await).await;
+    assert!(!card.contains(&format!("/r/{uid}")), "removed attachment should be gone from the card");
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/r/{uid}"))
+                .header(header::COOKIE, &s.cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "removed blob should be deleted");
+}

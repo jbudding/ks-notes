@@ -168,3 +168,30 @@ document.body.addEventListener("htmx:afterSwap", function (e) {
     syncResources(e.target);
   }
 });
+
+// Give the Save button immediate feedback while the form request is in flight:
+// turn it orange and swap the label to "Saving…". Scoped to form submits, so
+// pin/archive/edit/delete buttons (their own elt, no submit child) are untouched.
+function saveButton(detail) {
+  var form = detail && detail.elt;
+  if (!form || form.tagName !== "FORM") return null;
+  return form.querySelector("button[type=submit]");
+}
+
+document.body.addEventListener("htmx:beforeRequest", function (e) {
+  var btn = saveButton(e.detail);
+  if (!btn) return;
+  btn.dataset.label = btn.textContent;
+  btn.textContent = "Saving…";
+  btn.classList.add("saving");
+});
+
+document.body.addEventListener("htmx:afterRequest", function (e) {
+  var btn = saveButton(e.detail);
+  // On success the form is swapped away; this restores the button on errors or
+  // on the composer (which resets in place rather than being replaced).
+  if (!btn || btn.dataset.label === undefined) return;
+  btn.textContent = btn.dataset.label;
+  delete btn.dataset.label;
+  btn.classList.remove("saving");
+});
