@@ -3,7 +3,9 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, params, params_from_iter};
 
 use crate::error::AppError;
-use crate::models::{ExportNote, Memo, MemoState, TagCount, Visibility};
+use data_encoding::BASE64;
+
+use crate::models::{ExportAttachment, ExportNote, Memo, MemoState, TagCount, Visibility};
 
 const MEMO_COLS: &str = "m.id, m.uid, m.user_id, u.username, m.content, m.visibility,
                          m.pinned, m.state, m.created_at, m.updated_at, m.uuid, m.origin";
@@ -425,7 +427,7 @@ pub async fn export_by_tags(
         }
         let placeholders = vec!["?"; tags.len()].join(",");
         let sql = format!(
-            "SELECT m.uuid, m.content, m.visibility, m.created_at, m.updated_at
+            "SELECT m.id, m.uuid, m.content, m.visibility, m.created_at, m.updated_at
              FROM memos m
              WHERE m.user_id = ? AND m.state = 'normal' AND m.origin = 'local'
                AND m.id IN (SELECT memo_id FROM memo_tags WHERE tag IN ({placeholders}))
@@ -434,20 +436,69 @@ pub async fn export_by_tags(
         let mut binds: Vec<Value> = vec![Value::Integer(user_id)];
         binds.extend(tags.iter().map(|t| Value::Text(t.to_ascii_lowercase())));
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map(params_from_iter(binds), |r| {
-                Ok(ExportNote {
-                    uuid: r.get(0)?,
-                    content: r.get(1)?,
-                    visibility: r.get(2)?,
-                    created_at: r.get(3)?,
-                    updated_at: r.get(4)?,
-                })
+                Ok((r.get::<_, i64>(0)?, ExportNote {
+                    uuid: r.get(1)?,
+                    content: r.get(2)?,
+                    visibility: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                    attachments: Vec::new(),
+                }))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+
+        // Pull each note's attachments (with blob data) and base64 them inline.
+        let mut att_stmt = conn.prepare(
+            "SELECT filename, content_type, created_at, data
+             FROM resources WHERE memo_id = ?1 ORDER BY id",
+        )?;
+        for (id, note) in &mut rows {
+            note.attachments = att_stmt
+                .query_map([*id], |r| {
+                    Ok(ExportAttachment {
+                        filename: r.get(0)?,
+                        content_type: r.get(1)?,
+                        created_at: r.get(2)?,
+                        data: BASE64.encode(&r.get::<_, Vec<u8>>(3)?),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+
+        Ok(rows.into_iter().map(|(_, note)| note).collect())
     })
     .await
+}
+
+/// Insert one imported attachment row, attached to `memo_id` and owned by
+/// `user_id`. Returns whether the base64 decoded successfully.
+fn insert_imported_attachment(
+    conn: &Connection,
+    memo_id: i64,
+    user_id: i64,
+    att: &ExportAttachment,
+) -> Result<bool, AppError> {
+    let Ok(bytes) = BASE64.decode(att.data.as_bytes()) else {
+        return Ok(false);
+    };
+    let size = bytes.len() as i64;
+    conn.execute(
+        "INSERT INTO resources (uid, user_id, memo_id, filename, content_type, size, data, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            crate::auth::new_uid(),
+            user_id,
+            memo_id,
+            att.filename,
+            att.content_type,
+            size,
+            bytes,
+            att.created_at
+        ],
+    )?;
+    Ok(true)
 }
 
 /// Outcome of an import run, surfaced to the user.
@@ -506,6 +557,11 @@ pub async fn import_notes(
                             ],
                         )?;
                         sync_tags(&tx, id, content)?;
+                        // Replace attachments wholesale with the incoming set.
+                        tx.execute("DELETE FROM resources WHERE memo_id = ?1", params![id])?;
+                        for att in &note.attachments {
+                            insert_imported_attachment(&tx, id, user_id, att)?;
+                        }
                         summary.updated += 1;
                     } else {
                         summary.skipped += 1;
@@ -528,6 +584,9 @@ pub async fn import_notes(
                     )?;
                     let id = tx.last_insert_rowid();
                     sync_tags(&tx, id, content)?;
+                    for att in &note.attachments {
+                        insert_imported_attachment(&tx, id, user_id, att)?;
+                    }
                     summary.inserted += 1;
                 }
             }

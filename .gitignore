@@ -5,3 +5,5 @@
 *.db
 *.db-wal
 *.db-shm
+# Local DB backups (e.g. pre-migration snapshots)
+*.bak*

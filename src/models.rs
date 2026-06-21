@@ -83,6 +83,17 @@ pub struct Memo {
     pub updated_at: i64,
 }
 
+/// One attachment in the export/import JSON file. `data` is base64 (standard
+/// alphabet). Attachments have no id of their own — they're recreated as
+/// children of their note, which is deduped by `uuid`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub created_at: i64,
+    pub data: String,
+}
+
 /// One note in the export/import JSON file. `uuid` is the cross-instance
 /// identity used to dedup on import; tags are re-derived from `content`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +103,9 @@ pub struct ExportNote {
     pub visibility: Visibility,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Absent in v1 export files — defaults to no attachments.
+    #[serde(default)]
+    pub attachments: Vec<ExportAttachment>,
 }
 
 /// Top-level shape of an export file.

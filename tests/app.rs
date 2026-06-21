@@ -695,3 +695,89 @@ async fn import_overwrites_only_when_newer() {
     assert!(page.contains("skipped 1"), "older should skip: {page}");
     assert!(body_text(get(&app, &s, "/imported").await).await.contains("version two"), "content unchanged");
 }
+
+async fn open_registration(app: &Router, admin: &Session) {
+    app.clone()
+        .oneshot(form_req(
+            "/admin/registration",
+            Some(&admin.cookie),
+            &format!("csrf_token={}&enabled=true", admin.csrf),
+        ))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn export_import_round_trips_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let alice = register(&app, "alice", "password123").await.unwrap();
+
+    // Upload a 1 KiB file and attach it to a tagged memo.
+    let chip = body_text(app.clone().oneshot(upload_req(&alice, 1024)).await.unwrap()).await;
+    let uid = chip
+        .split("data-uid=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap()
+        .to_string();
+    app.clone()
+        .oneshot(
+            Request::post("/memos")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &alice.cookie)
+                .header("X-CSRF-Token", &alice.csrf)
+                .body(Body::from(format!(
+                    "content=report+%23work&visibility=private&resources={uid}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Export #work — the JSON must carry the attachment with non-empty base64.
+    let json = body_text(app.clone().oneshot(export_req(&alice, &["work"])).await.unwrap()).await;
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["version"], 2);
+    let att = &parsed["notes"][0]["attachments"][0];
+    assert_eq!(att["filename"], "big.bin");
+    assert!(!att["data"].as_str().unwrap().is_empty(), "base64 data present");
+
+    // Import into bob; the attachment is recreated and serves the same bytes.
+    open_registration(&app, &alice).await;
+    let bob = register(&app, "bob", "password123").await.unwrap();
+    let page = body_text(app.clone().oneshot(import_req(&bob, &json)).await.unwrap()).await;
+    assert!(page.contains("Imported 1 new"), "{page}");
+
+    let imported = body_text(get(&app, &bob, "/imported").await).await;
+    let rid = imported
+        .split("/r/")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap()
+        .to_string();
+    let resp = get(&app, &bob, &format!("/r/{rid}")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_text(resp).await.len(), 1024, "served attachment is the original 1 KiB");
+}
+
+#[tokio::test]
+async fn import_replaces_attachments_on_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "carol", "password123").await.unwrap();
+
+    // base64("hello") = aGVsbG8=, base64("world") = d29ybGQ=
+    let v1 = r#"{"version":2,"notes":[{"uuid":"att-uuid","content":"note #x","visibility":"private","created_at":1000,"updated_at":1000,"attachments":[{"filename":"a.txt","content_type":"text/plain","created_at":1000,"data":"aGVsbG8="}]}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, v1)).await.unwrap()).await;
+    assert!(page.contains("Imported 1 new"), "{page}");
+    let imported = body_text(get(&app, &s, "/imported").await).await;
+    assert!(imported.contains("a.txt"));
+
+    // Newer version swaps the attachment set.
+    let v2 = r#"{"version":2,"notes":[{"uuid":"att-uuid","content":"note #x","visibility":"private","created_at":1000,"updated_at":2000,"attachments":[{"filename":"b.txt","content_type":"text/plain","created_at":2000,"data":"d29ybGQ="}]}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, v2)).await.unwrap()).await;
+    assert!(page.contains("updated 1"), "{page}");
+    let imported = body_text(get(&app, &s, "/imported").await).await;
+    assert!(imported.contains("b.txt") && !imported.contains("a.txt"), "old attachment replaced: {imported}");
+}
