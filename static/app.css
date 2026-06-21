@@ -418,6 +418,9 @@ label { display: block; margin: 12px 0 4px; font-weight: 500; }
 .page-title { margin: 0 0 16px; }
 .settings-section { margin-bottom: 22px; }
 .settings-section h2 { font-size: 1.05rem; margin: 0 0 10px; }
+.tag-picker { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
+.tag-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.tag-check input { width: auto; }
 
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }

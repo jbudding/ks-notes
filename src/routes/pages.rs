@@ -195,6 +195,30 @@ pub async fn archive(
     .await
 }
 
+pub async fn imported(
+    State(state): State<AppState>,
+    AuthUser(session): AuthUser,
+    headers: HeaderMap,
+    Query(p): Query<FeedParams>,
+) -> Result<Response, AppError> {
+    let feed = Feed::Imported(session.user.id);
+    feed_response(
+        &state,
+        &session,
+        &headers,
+        p,
+        feed,
+        FeedCfg {
+            nav: "imported",
+            title: "Imported",
+            path: "/imported",
+            composer: false,
+            activity: false,
+        },
+    )
+    .await
+}
+
 async fn feed_response(
     state: &AppState,
     session: &SessionUser,

@@ -101,6 +101,21 @@ CREATE TRIGGER memos_fts_au AFTER UPDATE OF content ON memos BEGIN
   INSERT INTO memos_fts(rowid, content) VALUES (new.id, new.content);
 END;
 "#,
+    // 002 — stable per-note uuid (for export/import identity) + origin marker.
+    // Existing rows are backfilled with a random 32-char hex id; new local notes
+    // get a UUIDv4 from the app. `origin` separates imported notes into their own
+    // feed so they never mix with authored ones.
+    r#"
+ALTER TABLE memos ADD COLUMN uuid TEXT;
+UPDATE memos SET uuid = lower(hex(randomblob(16))) WHERE uuid IS NULL;
+-- Unique per user, not globally: different users may import the same note
+-- (same uuid) and each keeps their own copy.
+CREATE UNIQUE INDEX idx_memos_uuid ON memos(user_id, uuid);
+
+ALTER TABLE memos ADD COLUMN origin TEXT NOT NULL DEFAULT 'local'
+  CHECK (origin IN ('local','imported'));
+CREATE INDEX idx_memos_origin ON memos(user_id, origin, state, created_at DESC);
+"#,
 ];
 
 /// Open the database directly (pre-pool), enable WAL, and apply pending migrations.

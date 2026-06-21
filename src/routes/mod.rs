@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth_routes;
+pub mod export_routes;
 pub mod memo_routes;
 pub mod pages;
 pub mod resource_routes;
@@ -25,6 +26,7 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(pages::home))
         .route("/explore", get(pages::explore))
         .route("/archive", get(pages::archive))
+        .route("/imported", get(pages::imported))
         .route("/m/{uid}", get(pages::memo_page))
         .route("/memos", post(memo_routes::create))
         .route("/memos/{id}", put(memo_routes::update).delete(memo_routes::delete))
@@ -34,6 +36,8 @@ pub fn router(state: AppState) -> Router {
         .route("/memos/{id}/archive", post(memo_routes::toggle_archived))
         .route("/resources", post(resource_routes::upload))
         .route("/r/{uid}", get(resource_routes::serve))
+        .route("/export", get(export_routes::page).post(export_routes::download))
+        .route("/import", post(export_routes::import))
         .route("/login", get(auth_routes::login_page).post(auth_routes::login_submit))
         .route(
             "/register",

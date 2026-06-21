@@ -49,6 +49,11 @@ text_enum!(MemoState {
     Archived => "archived",
 });
 
+text_enum!(MemoOrigin {
+    Local => "local",
+    Imported => "imported",
+});
+
 #[derive(Debug, Clone)]
 pub struct User {
     pub id: i64,
@@ -66,14 +71,34 @@ impl User {
 pub struct Memo {
     pub id: i64,
     pub uid: String,
+    pub uuid: String,
     pub user_id: i64,
     pub username: String,
     pub content: String,
     pub visibility: Visibility,
     pub pinned: bool,
     pub state: MemoState,
+    pub origin: MemoOrigin,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// One note in the export/import JSON file. `uuid` is the cross-instance
+/// identity used to dedup on import; tags are re-derived from `content`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportNote {
+    pub uuid: String,
+    pub content: String,
+    pub visibility: Visibility,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Top-level shape of an export file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportFile {
+    pub version: u32,
+    pub notes: Vec<ExportNote>,
 }
 
 #[derive(Debug, Clone)]

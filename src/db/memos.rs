@@ -3,10 +3,10 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, params, params_from_iter};
 
 use crate::error::AppError;
-use crate::models::{Memo, MemoState, TagCount, Visibility};
+use crate::models::{ExportNote, Memo, MemoState, TagCount, Visibility};
 
 const MEMO_COLS: &str = "m.id, m.uid, m.user_id, u.username, m.content, m.visibility,
-                         m.pinned, m.state, m.created_at, m.updated_at";
+                         m.pinned, m.state, m.created_at, m.updated_at, m.uuid, m.origin";
 
 fn memo_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Memo> {
     Ok(Memo {
@@ -20,6 +20,8 @@ fn memo_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Memo> {
         state: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
+        uuid: r.get(10)?,
+        origin: r.get(11)?,
     })
 }
 
@@ -97,11 +99,12 @@ pub async fn create(
     resource_uids: Vec<String>,
 ) -> Result<Memo, AppError> {
     let uid = crate::auth::new_uid();
+    let uuid = crate::auth::new_uuid();
     crate::db::run(pool, move |conn| {
         let tx = conn.transaction()?;
         tx.execute(
-            "INSERT INTO memos (uid, user_id, content, visibility) VALUES (?1, ?2, ?3, ?4)",
-            params![uid, user_id, content, visibility],
+            "INSERT INTO memos (uid, uuid, user_id, content, visibility) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![uid, uuid, user_id, content, visibility],
         )?;
         let id = tx.last_insert_rowid();
         sync_tags(&tx, id, &content)?;
@@ -210,12 +213,14 @@ pub async fn delete(pool: &Pool, memo_id: i64, user_id: i64) -> Result<(), AppEr
 
 #[derive(Debug, Clone)]
 pub enum Feed {
-    /// The owner's own timeline (all visibilities).
+    /// The owner's own authored timeline (all visibilities, local origin).
     Own(i64),
     /// The owner's archived memos.
     Archive(i64),
     /// Everyone's public memos (+ protected ones for signed-in viewers).
     Explore { signed_in: bool },
+    /// The owner's imported memos (origin='imported'), kept out of every other feed.
+    Imported(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -252,7 +257,7 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
 
         match &query.feed {
             Feed::Own(user_id) => {
-                wheres.push("m.user_id = ? AND m.state = 'normal'".into());
+                wheres.push("m.user_id = ? AND m.state = 'normal' AND m.origin = 'local'".into());
                 binds.push(Value::Integer(*user_id));
             }
             Feed::Archive(user_id) => {
@@ -260,13 +265,20 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
                 binds.push(Value::Integer(*user_id));
             }
             Feed::Explore { signed_in } => {
+                // Imported notes are never surfaced in the public square.
                 if *signed_in {
                     wheres.push(
-                        "m.state = 'normal' AND m.visibility IN ('public','protected')".into(),
+                        "m.state = 'normal' AND m.origin = 'local' AND m.visibility IN ('public','protected')".into(),
                     );
                 } else {
-                    wheres.push("m.state = 'normal' AND m.visibility = 'public'".into());
+                    wheres.push(
+                        "m.state = 'normal' AND m.origin = 'local' AND m.visibility = 'public'".into(),
+                    );
                 }
+            }
+            Feed::Imported(user_id) => {
+                wheres.push("m.user_id = ? AND m.state = 'normal' AND m.origin = 'imported'".into());
+                binds.push(Value::Integer(*user_id));
             }
         }
         if let Some(tag) = &query.tag {
@@ -300,7 +312,7 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
             };
             let mut stmt = conn.prepare(&format!(
                 "SELECT {MEMO_COLS} FROM memos m JOIN users u ON u.id = m.user_id
-                 WHERE m.user_id = ?1 AND m.state = 'normal' AND m.pinned = 1
+                 WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = 'local' AND m.pinned = 1
                  ORDER BY m.created_at DESC, m.id DESC"
             ))?;
             stmt.query_map([user_id], memo_from_row)?
@@ -340,7 +352,7 @@ pub async fn tag_counts(pool: &Pool, user_id: i64) -> Result<Vec<TagCount>, AppE
         let mut stmt = conn.prepare(
             "SELECT t.tag, COUNT(*) FROM memo_tags t
              JOIN memos m ON m.id = t.memo_id
-             WHERE m.user_id = ?1 AND m.state = 'normal'
+             WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = 'local'
              GROUP BY t.tag ORDER BY COUNT(*) DESC, t.tag",
         )?;
         let rows = stmt
@@ -396,4 +408,132 @@ pub fn can_view_considering_state(memo: &Memo, viewer: Option<&crate::models::Us
         return viewer.map(|u| u.id == memo.user_id).unwrap_or(false);
     }
     can_view(memo, viewer)
+}
+
+// ---------- Export / import ----------
+
+/// The user's own active (local) notes carrying any of `tags`, as export rows.
+/// Tags are matched lowercased; an empty `tags` yields nothing.
+pub async fn export_by_tags(
+    pool: &Pool,
+    user_id: i64,
+    tags: Vec<String>,
+) -> Result<Vec<ExportNote>, AppError> {
+    crate::db::run(pool, move |conn| {
+        if tags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; tags.len()].join(",");
+        let sql = format!(
+            "SELECT m.uuid, m.content, m.visibility, m.created_at, m.updated_at
+             FROM memos m
+             WHERE m.user_id = ? AND m.state = 'normal' AND m.origin = 'local'
+               AND m.id IN (SELECT memo_id FROM memo_tags WHERE tag IN ({placeholders}))
+             ORDER BY m.created_at DESC, m.id DESC"
+        );
+        let mut binds: Vec<Value> = vec![Value::Integer(user_id)];
+        binds.extend(tags.iter().map(|t| Value::Text(t.to_ascii_lowercase())));
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |r| {
+                Ok(ExportNote {
+                    uuid: r.get(0)?,
+                    content: r.get(1)?,
+                    visibility: r.get(2)?,
+                    created_at: r.get(3)?,
+                    updated_at: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })
+    .await
+}
+
+/// Outcome of an import run, surfaced to the user.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ImportSummary {
+    pub inserted: usize,
+    pub updated: usize,
+    pub skipped: usize,
+}
+
+/// Import notes under `user_id`, deduping by `uuid`:
+/// - matches an existing **imported** note → overwrite iff strictly newer, else skip;
+/// - matches one of the user's **local** (authored) notes → skip (already present);
+/// - no match → insert as a new imported note, preserving timestamps.
+/// Each note's tags are re-derived from its content.
+pub async fn import_notes(
+    pool: &Pool,
+    user_id: i64,
+    notes: Vec<ExportNote>,
+) -> Result<ImportSummary, AppError> {
+    crate::db::run(pool, move |conn| {
+        let tx = conn.transaction()?;
+        let mut summary = ImportSummary::default();
+        for note in &notes {
+            let content = note.content.trim();
+            if content.is_empty() || note.uuid.trim().is_empty() {
+                summary.skipped += 1;
+                continue;
+            }
+
+            // Existing note with this uuid, if any (origin + freshness decide the action).
+            let existing: Option<(i64, String, i64)> = tx
+                .query_row(
+                    "SELECT id, origin, updated_at FROM memos WHERE user_id = ?1 AND uuid = ?2",
+                    params![user_id, note.uuid],
+                    |r| Ok((r.get(0)?, r.get::<_, String>(1)?, r.get(2)?)),
+                )
+                .ok();
+
+            match existing {
+                Some((_, origin, _)) if origin == "local" => {
+                    summary.skipped += 1;
+                }
+                Some((id, _, existing_updated)) => {
+                    if note.updated_at > existing_updated {
+                        tx.execute(
+                            "UPDATE memos SET content = ?1, visibility = ?2,
+                                 created_at = ?3, updated_at = ?4
+                             WHERE id = ?5",
+                            params![
+                                content,
+                                note.visibility,
+                                note.created_at,
+                                note.updated_at,
+                                id
+                            ],
+                        )?;
+                        sync_tags(&tx, id, content)?;
+                        summary.updated += 1;
+                    } else {
+                        summary.skipped += 1;
+                    }
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO memos
+                           (uid, uuid, user_id, content, visibility, origin, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, 'imported', ?6, ?7)",
+                        params![
+                            crate::auth::new_uid(),
+                            note.uuid,
+                            user_id,
+                            content,
+                            note.visibility,
+                            note.created_at,
+                            note.updated_at
+                        ],
+                    )?;
+                    let id = tx.last_insert_rowid();
+                    sync_tags(&tx, id, content)?;
+                    summary.inserted += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(summary)
+    })
+    .await
 }

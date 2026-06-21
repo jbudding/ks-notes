@@ -65,6 +65,19 @@ pub fn new_uid() -> String {
         .collect()
 }
 
+/// A random UUIDv4 string — the stable cross-instance identity stamped on each
+/// note at creation so imports can dedup instead of duplicating.
+pub fn new_uuid() -> String {
+    let mut b = [0u8; 16];
+    rand::rng().fill(&mut b);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variant 1
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
+    )
+}
+
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle_eq::ct_eq;
     ct_eq(a.as_bytes(), b.as_bytes())

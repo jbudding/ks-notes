@@ -584,3 +584,114 @@ async fn edit_reconciles_attachments() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND, "removed blob should be deleted");
 }
+
+// ---------- Export / import ----------
+
+async fn get(app: &Router, s: &Session, path: &str) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::get(path)
+                .header(header::COOKIE, &s.cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+fn export_req(s: &Session, tags: &[&str]) -> Request<Body> {
+    let mut body = format!("csrf_token={}", s.csrf);
+    for t in tags {
+        body.push_str(&format!("&tags={t}"));
+    }
+    Request::post("/export")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::COOKIE, &s.cookie)
+        .body(Body::from(body))
+        .unwrap()
+}
+
+fn import_req(s: &Session, json: &str) -> Request<Body> {
+    let boundary = "IMPORTBOUNDARY";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{}\r\n", s.csrf)
+            .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"export.json\"\r\nContent-Type: application/json\r\n\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(json.as_bytes());
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Request::post("/import")
+        .header(header::COOKIE, &s.cookie)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn export_selects_by_tag_and_import_isolates() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let alice = register(&app, "alice", "password123").await.unwrap();
+    create_memo(&app, &alice, "work note #work", "private").await;
+    create_memo(&app, &alice, "life note #life", "private").await;
+
+    // Export only #work.
+    let resp = app.clone().oneshot(export_req(&alice, &["work"])).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = body_text(resp).await;
+    assert!(json.contains("work note"), "export should include #work note: {json}");
+    assert!(!json.contains("life note"), "export should exclude other tags");
+
+    // Importing alice's own export back is a no-op (uuid matches local notes).
+    let page = body_text(app.clone().oneshot(import_req(&alice, &json)).await.unwrap()).await;
+    assert!(page.contains("Imported 0 new") && page.contains("skipped 1"), "self-import skipped: {page}");
+
+    // Import into bob: lands as imported, visible only under /imported.
+    app.clone()
+        .oneshot(form_req(
+            "/admin/registration",
+            Some(&alice.cookie),
+            &format!("csrf_token={}&enabled=true", alice.csrf),
+        ))
+        .await
+        .unwrap();
+    let bob = register(&app, "bob", "password123").await.unwrap();
+    let page = body_text(app.clone().oneshot(import_req(&bob, &json)).await.unwrap()).await;
+    assert!(page.contains("Imported 1 new"), "summary: {page}");
+
+    assert!(body_text(get(&app, &bob, "/imported").await).await.contains("work note"));
+    assert!(!body_text(get(&app, &bob, "/").await).await.contains("work note"), "imported note must not show in Home");
+
+    // Re-importing the same file doesn't duplicate.
+    let page = body_text(app.clone().oneshot(import_req(&bob, &json)).await.unwrap()).await;
+    assert!(page.contains("Imported 0 new") && page.contains("skipped 1"), "re-import skipped: {page}");
+}
+
+#[tokio::test]
+async fn import_overwrites_only_when_newer() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "carol", "password123").await.unwrap();
+
+    let v1 = r#"{"version":1,"notes":[{"uuid":"fixed-uuid-1","content":"version one #x","visibility":"private","created_at":1000,"updated_at":1000}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, v1)).await.unwrap()).await;
+    assert!(page.contains("Imported 1 new"), "first import: {page}");
+
+    // Newer updated_at overwrites.
+    let v2 = r#"{"version":1,"notes":[{"uuid":"fixed-uuid-1","content":"version two #x","visibility":"private","created_at":1000,"updated_at":2000}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, v2)).await.unwrap()).await;
+    assert!(page.contains("updated 1"), "newer should update: {page}");
+    assert!(body_text(get(&app, &s, "/imported").await).await.contains("version two"));
+
+    // Older (or equal) updated_at is skipped.
+    let page = body_text(app.clone().oneshot(import_req(&s, v1)).await.unwrap()).await;
+    assert!(page.contains("skipped 1"), "older should skip: {page}");
+    assert!(body_text(get(&app, &s, "/imported").await).await.contains("version two"), "content unchanged");
+}

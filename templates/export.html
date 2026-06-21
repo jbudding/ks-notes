@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Export · ks-notes{% endblock %}
+
+{% block content %}
+<div class="app">
+  {% include "partials/sidebar.html" %}
+  <main>
+    <h1 class="page-title">Export &amp; import</h1>
+
+    {% if let Some(msg) = message %}
+    <div class="card settings-section" style="border-color: var(--accent);">{{ msg }}</div>
+    {% endif %}
+    {% if let Some(err) = error %}
+    <div class="form-error">{{ err }}</div>
+    {% endif %}
+
+    <div class="card settings-section">
+      <h2>Export notes</h2>
+      <p class="muted">Pick the hashtags to export. Notes carrying any of the
+        selected tags are downloaded as a JSON file you can import elsewhere.</p>
+      {% if tags.is_empty() %}
+      <p class="muted">You don't have any tagged notes yet.</p>
+      {% else %}
+      <form method="post" action="/export">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="tag-picker">
+          {% for t in tags %}
+          <label class="tag-check">
+            <input type="checkbox" name="tags" value="{{ t.tag }}">
+            #{{ t.tag }} <span class="muted">({{ t.count }})</span>
+          </label>
+          {% endfor %}
+        </div>
+        <p><button type="submit" class="btn-primary">Export selected</button></p>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="card settings-section">
+      <h2>Import notes</h2>
+      <p class="muted">Upload a ks-notes export file. Notes are matched by id:
+        new ones are added, newer versions overwrite, and notes you already have
+        are skipped — no duplicates. Imported notes live under
+        <a href="/imported">Imported</a>.</p>
+      <form method="post" action="/import" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="file" name="file" accept=".json,application/json" required>
+        <p><button type="submit" class="btn-primary">Import</button></p>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}
