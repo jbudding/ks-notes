@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Register · ks-notes{% endblock %}
+
+{% block content %}
+<main class="center-wrap">
+  <div class="card auth-card">
+    <h1>ks-notes</h1>
+    {% if first_user %}
+    <p class="muted">Welcome! Create the first account — it will be the admin.</p>
+    {% else %}
+    <p class="muted">Create your account</p>
+    {% endif %}
+    {% if let Some(err) = error %}
+    <div class="form-error">{{ err }}</div>
+    {% endif %}
+    <form method="post" action="/register">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+      <label for="password_confirm">Confirm password</label>
+      <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" minlength="8" required>
+      <button type="submit" class="btn-primary">Create account</button>
+    </form>
+    <p class="alt"><a href="/login">Back to sign in</a></p>
+  </div>
+</main>
+{% endblock %}

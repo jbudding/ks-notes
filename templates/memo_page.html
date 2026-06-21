@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} · ks-notes{% endblock %}
+
+{% block content %}
+<div class="app">
+  <aside class="sidebar">
+    <a class="brand" href="/">📝 ks-notes</a>
+  </aside>
+  <main>
+    {% include "partials/memo_card.html" %}
+  </main>
+</div>
+{% endblock %}

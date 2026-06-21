@@ -1,0 +1,11 @@
+{% for m in memos %}
+{% include "partials/memo_card.html" %}
+{% endfor %}
+{% if memos.is_empty() && next_before.is_none() %}
+<div class="empty-note">Nothing here yet.</div>
+{% endif %}
+{% if let Some(b) = next_before %}
+<div class="load-sentinel"
+     hx-get="{{ feed_path }}?before={{ b }}{% if let Some(t) = tag_filter %}&tag={{ t|urlencode }}{% endif %}{% if let Some(qq) = q %}&q={{ qq|urlencode }}{% endif %}"
+     hx-trigger="revealed" hx-swap="outerHTML">Loading…</div>
+{% endif %}

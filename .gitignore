@@ -1,0 +1,7 @@
+/target
+
+# Runtime data (SQLite databases, WAL/SHM sidecars)
+/data
+*.db
+*.db-wal
+*.db-shm

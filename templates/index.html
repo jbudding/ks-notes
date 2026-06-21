@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}{{ feed_title }} · ks-notes{% endblock %}
+
+{% block body_attrs %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endblock %}
+
+{% block content %}
+<div class="app">
+  {% include "partials/sidebar.html" %}
+  <main>
+    <input class="search-box" type="search" name="q" placeholder="Search memos…"
+           value="{% if let Some(qq) = q %}{{ qq }}{% endif %}"
+           hx-get="{{ feed_path }}" hx-trigger="input changed delay:300ms, search"
+           hx-target="#memo-list" hx-push-url="true"
+           {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+
+    {% if show_composer %}
+    <form class="composer" hx-post="/memos" hx-target="#memo-feed" hx-swap="afterbegin"
+          hx-on::after-request="if(event.detail.successful) { this.reset(); this.querySelector('.attach-chips').innerHTML=''; }">
+      <textarea name="content" placeholder="Any thoughts…" required></textarea>
+      <input type="hidden" name="resources" value="" class="resource-uids">
+      <div class="attach-chips"></div>
+      <div class="composer-bar">
+        <label class="btn-ghost" title="Attach files">
+          📎<input type="file" name="file" multiple hidden class="file-input"
+                   hx-post="/resources" hx-encoding="multipart/form-data"
+                   hx-target="previous .attach-chips" hx-swap="beforeend">
+        </label>
+        <span class="spacer"></span>
+        <select name="visibility">
+          <option value="private">Private</option>
+          <option value="protected">Protected</option>
+          <option value="public">Public</option>
+        </select>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if let Some(t) = tag_filter %}
+    <p class="muted">Filtering by <strong>#{{ t }}</strong> — <a href="{{ feed_path }}">clear</a></p>
+    {% endif %}
+
+    <div id="memo-list">
+      {% include "partials/memo_list.html" %}
+    </div>
+  </main>
+</div>
+{% endblock %}

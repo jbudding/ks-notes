@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}{{ status }} · ks-notes{% endblock %}
+
+{% block content %}
+<main class="center-wrap">
+  <div class="card auth-card">
+    <h1 class="error-code">{{ status }}</h1>
+    <p>{{ message }}</p>
+    <p><a href="/">← Back to ks-notes</a></p>
+  </div>
+</main>
+{% endblock %}

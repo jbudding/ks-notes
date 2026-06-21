@@ -1,0 +1,21 @@
+<aside class="sidebar">
+  <a class="brand" href="/">📝 ks-notes</a>
+  <nav class="nav">
+    <a href="/" {% if nav_active == "home" %}class="active"{% endif %}>Home</a>
+    <a href="/explore" {% if nav_active == "explore" %}class="active"{% endif %}>Explore</a>
+    <a href="/archive" {% if nav_active == "archive" %}class="active"{% endif %}>Archive</a>
+    <a href="/settings" {% if nav_active == "settings" %}class="active"{% endif %}>Settings</a>
+    {% if is_admin %}
+    <a href="/admin" {% if nav_active == "admin" %}class="active"{% endif %}>Admin</a>
+    {% endif %}
+  </nav>
+  {% let oob = false %}
+  {% include "partials/tag_sidebar.html" %}
+  <div class="user-box">
+    <div>@{{ username }}</div>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-ghost">Sign out</button>
+    </form>
+  </div>
+</aside>

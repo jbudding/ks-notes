@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · ks-notes{% endblock %}
+
+{% block content %}
+<main class="center-wrap">
+  <div class="card auth-card">
+    <h1>ks-notes</h1>
+    <p class="muted">Sign in to your memos</p>
+    {% if let Some(err) = error %}
+    <div class="form-error">{{ err }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit" class="btn-primary">Sign in</button>
+    </form>
+    {% if registration_open %}
+    <p class="alt">No account yet? <a href="/register">Create one</a></p>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

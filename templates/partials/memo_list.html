@@ -1,0 +1,8 @@
+{% if !pinned.is_empty() %}
+{% for m in pinned %}
+{% include "partials/memo_card.html" %}
+{% endfor %}
+{% endif %}
+<div id="memo-feed">
+  {% include "partials/memo_feed_items.html" %}
+</div>

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Settings · ks-notes{% endblock %}
+
+{% block content %}
+<div class="app">
+  {% include "partials/sidebar.html" %}
+  <main>
+    <h1 class="page-title">Settings</h1>
+
+    {% if let Some(msg) = message %}
+    <div class="card settings-section" style="border-color: var(--accent);">{{ msg }}</div>
+    {% endif %}
+    {% if let Some(err) = error %}
+    <div class="form-error">{{ err }}</div>
+    {% endif %}
+
+    <div class="card settings-section">
+      <h2>Change password</h2>
+      <form method="post" action="/settings/password">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="current_password">Current password</label>
+        <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+        <label for="new_password">New password</label>
+        <input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+        <label for="new_password_confirm">Confirm new password</label>
+        <input id="new_password_confirm" name="new_password_confirm" type="password" autocomplete="new-password" minlength="8" required>
+        <p><button type="submit" class="btn-primary">Update password</button></p>
+        <p class="muted">Changing your password signs you out everywhere else.</p>
+      </form>
+    </div>
+
+    <div class="card settings-section">
+      <h2>API tokens</h2>
+      <p class="muted">Use with <code>Authorization: Bearer &lt;token&gt;</code> against <code>/api/v1/</code>.</p>
+      {% if let Some(t) = new_token %}
+      <div class="token-reveal">{{ t }}</div>
+      <p class="muted">Copy it now — it won't be shown again.</p>
+      {% endif %}
+      {% if !tokens.is_empty() %}
+      <table class="table">
+        <tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr>
+        {% for t in tokens %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td><time datetime="{{ t.created_iso }}">{{ t.created_display }}</time></td>
+          <td>{% if let Some(lu) = t.last_used_display %}{{ lu }}{% else %}never{% endif %}</td>
+          <td>
+            <form method="post" action="/settings/tokens/{{ t.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-ghost btn-danger">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+      <form method="post" action="/settings/tokens" style="margin-top: 12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input name="name" placeholder="Token name (e.g. cli)" maxlength="64" required>
+        <button type="submit">Create token</button>
+      </form>
+    </div>
+  </main>
+</div>
+{% endblock %}

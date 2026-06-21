@@ -1,0 +1,23 @@
+<article class="memo-card memo-editor" id="memo-{{ m.id }}">
+  <form hx-put="/memos/{{ m.id }}" hx-target="closest .memo-card" hx-swap="outerHTML">
+    <textarea name="content" required>{{ m.raw }}</textarea>
+    <input type="hidden" name="resources" value="" class="resource-uids">
+    <div class="attach-chips"></div>
+    <div class="composer-bar">
+      <label class="btn-ghost" title="Attach files">
+        📎<input type="file" name="file" multiple hidden class="file-input"
+                 hx-post="/resources" hx-encoding="multipart/form-data"
+                 hx-target="previous .attach-chips" hx-swap="beforeend">
+      </label>
+      <span class="spacer"></span>
+      <select name="visibility">
+        <option value="private" {% if m.visibility == "private" %}selected{% endif %}>Private</option>
+        <option value="protected" {% if m.visibility == "protected" %}selected{% endif %}>Protected</option>
+        <option value="public" {% if m.visibility == "public" %}selected{% endif %}>Public</option>
+      </select>
+      <button type="button" class="btn-ghost" hx-get="/memos/{{ m.id }}/card"
+              hx-target="closest .memo-card" hx-swap="outerHTML">Cancel</button>
+      <button type="submit" class="btn-primary">Save</button>
+    </div>
+  </form>
+</article>
