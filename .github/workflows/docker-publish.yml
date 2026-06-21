@@ -1,11 +1,12 @@
- name: Publish container image
+  name: Publish container image
 
-  on:
+  "on":
     push:
       branches: [master]
       tags: ["v*"]
     workflow_dispatch:
 
+  env:
     REGISTRY: ghcr.io
     IMAGE_NAME: ${{ github.repository }}
 
@@ -52,3 +53,4 @@
             labels: ${{ steps.meta.outputs.labels }}
             cache-from: type=gha
             cache-to: type=gha,mode=max
+
