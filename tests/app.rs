@@ -404,3 +404,60 @@ async fn anonymous_is_redirected_to_login() {
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     assert_eq!(resp.headers()[header::LOCATION], "/login");
 }
+
+/// Build a single-file multipart upload body for the `/resources` route.
+fn upload_req(s: &Session, size: usize) -> Request<Body> {
+    let boundary = "TESTBOUNDARY";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"big.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&vec![0u8; size]);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    Request::post("/resources")
+        .header(header::COOKIE, &s.cookie)
+        .header("X-CSRF-Token", &s.csrf)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        // Browsers send Content-Length; with it the cap is enforced up-front
+        // (413) rather than mid-stream.
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(Body::from(body))
+        .unwrap()
+}
+
+// Uploads larger than axum's 2 MiB DefaultBodyLimit must still succeed up to the
+// configured cap — Multipart enforces that limit per field, so the router raises
+// it to match max_upload_mb. Regression test for the 2 MiB silent ceiling.
+#[tokio::test]
+async fn upload_above_default_body_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir); // max_upload_mb: 4
+    let s = register(&app, "bob", "password123").await.unwrap();
+
+    // 3 MiB: over axum's 2 MiB default, under the 4 MB cap.
+    let resp = app
+        .clone()
+        .oneshot(upload_req(&s, 3 * 1024 * 1024))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "3 MiB upload should succeed");
+
+    // 5 MiB: over the 4 MB cap, must be rejected by RequestBodyLimitLayer.
+    let resp = app
+        .clone()
+        .oneshot(upload_req(&s, 5 * 1024 * 1024))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "upload over the cap should be rejected"
+    );
+}

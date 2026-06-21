@@ -7,6 +7,7 @@ pub mod settings_routes;
 pub mod statics;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -57,7 +58,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tags", get(api::tags))
         .route("/healthz", get(healthz))
         .route("/static/{*file}", get(statics::serve))
+        // RequestBodyLimitLayer caps the whole stream, but axum's Multipart
+        // extractor independently enforces DefaultBodyLimit (2 MiB by default)
+        // per field — so raise that to match the configured cap too.
         .layer(RequestBodyLimitLayer::new(max_body))
+        .layer(DefaultBodyLimit::max(max_body))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
