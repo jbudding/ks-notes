@@ -60,6 +60,12 @@ a:hover { text-decoration: underline; }
   color: var(--text);
 }
 .brand:hover { text-decoration: none; }
+.brand-version {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
 
 .nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 20px; }
 

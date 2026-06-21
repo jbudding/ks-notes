@@ -10,6 +10,9 @@ pub mod views;
 
 use std::sync::Arc;
 
+/// Crate version, surfaced in the UI next to the brand.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use crate::config::Config;
 use crate::error::AppError;
 use crate::state::AppState;

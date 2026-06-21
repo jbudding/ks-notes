@@ -5,7 +5,7 @@
 {% block content %}
 <div class="app">
   <aside class="sidebar">
-    <a class="brand" href="/">📝 ks-notes</a>
+    <a class="brand" href="/">📝 ks-notes <span class="brand-version">v{{ crate::VERSION }}</span></a>
   </aside>
   <main>
     {% include "partials/memo_card.html" %}

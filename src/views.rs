@@ -29,6 +29,16 @@ pub struct AttachmentView {
     pub is_image: bool,
 }
 
+/// Human-readable attachment size limit for the composer's paperclip tooltip.
+/// `0` means uncapped (see `Config::max_upload_mb`).
+pub fn upload_limit_label(max_upload_mb: usize) -> String {
+    if max_upload_mb == 0 {
+        "no size limit".into()
+    } else {
+        format!("max {max_upload_mb} MB")
+    }
+}
+
 pub fn format_times(ts: i64) -> (String, String) {
     let dt = OffsetDateTime::from_unix_timestamp(ts).unwrap_or(OffsetDateTime::UNIX_EPOCH);
     let iso = dt.format(&Rfc3339).unwrap_or_default();

@@ -22,6 +22,7 @@ struct MemoCard {
 #[template(path = "partials/memo_edit_form.html")]
 struct MemoEditForm {
     m: MemoView,
+    upload_limit: String,
 }
 
 #[derive(Template)]
@@ -135,6 +136,7 @@ pub async fn edit_form(
     let memo = own_memo(&state, id, session.user.id).await?;
     render(&MemoEditForm {
         m: card_view(&state, &memo, &session.user).await?,
+        upload_limit: crate::views::upload_limit_label(state.config.max_upload_mb),
     })
 }
 
