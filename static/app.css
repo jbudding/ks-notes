@@ -361,9 +361,14 @@ label { display: block; margin: 12px 0 4px; font-weight: 500; }
   border: none;
   border-radius: 0;
   box-shadow: none;
-  overflow: auto;
+  /* Long notes (and the editor) scroll within the full-page view. */
+  overflow-y: scroll;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 28px max(24px, 5vw);
 }
+/* Let the editor's textarea grow with content so the page (not the box) scrolls. */
+.memo-card.memo-expanded.memo-editor textarea { min-height: 50vh; }
 .memo-card.memo-expanded .memo-actions { opacity: 1; }
 body.has-expanded-memo { overflow: hidden; }
 
