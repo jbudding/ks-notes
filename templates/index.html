@@ -40,7 +40,7 @@
     <form class="composer" hx-post="/memos" hx-target="#memo-feed" hx-swap="afterbegin"
           hx-on::after-request="if(event.detail.successful && event.detail.elt === this) { this.reset(); this.querySelector('.attach-chips').innerHTML=''; }">
       {% if let Some(sid) = composer_section %}<input type="hidden" name="section_id" value="{{ sid }}">{% endif %}
-      <textarea name="content" placeholder="Any thoughts…" data-self-tag="{{ username }}"{% if let Some(t) = tag_filter %} data-filter-tag="{{ t }}"{% endif %} required></textarea>
+      <textarea name="content" placeholder="Any thoughts…" required></textarea>
       <div class="composer-bar">
         <label class="btn-ghost" title="Attach files ({{ upload_limit }})">
           📎<input type="file" name="file" multiple hidden class="file-input">

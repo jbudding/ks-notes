@@ -382,33 +382,4 @@ document.body.addEventListener("htmx:afterRequest", function (e) {
     delete btn.dataset.label;
     btn.classList.remove("saving");
   }
-
-  // After a note is posted the composer resets to empty; re-seed it for the
-  // next note (deferred so the inline reset handler runs first).
-  var form = e.detail && e.detail.elt;
-  if (form && form.classList && form.classList.contains("composer") && e.detail.successful) {
-    setTimeout(function () {
-      seedSelfTag(form.querySelector("textarea[data-self-tag]"));
-    }, 0);
-  }
 });
-
-// Seed an empty composer with the author's own #tag on its own line, a blank
-// line below the cursor, so every note is self-tagged but typed above it.
-function seedSelfTag(ta) {
-  if (!ta || ta.value.trim() !== "") return;
-  var tags = [];
-  var self = ta.getAttribute("data-self-tag");
-  if (self) tags.push(self);
-  // When the feed is filtered by a tag, seed that tag too so notes written
-  // here stay in the same bucket. Dedupe case-insensitively against the self-tag.
-  var filter = ta.getAttribute("data-filter-tag");
-  if (filter && filter.toLowerCase() !== (self || "").toLowerCase()) tags.push(filter);
-  if (!tags.length) return;
-  ta.value = "\n\n" + tags.map(function (t) { return "#" + t; }).join(" ");
-  try {
-    ta.setSelectionRange(0, 0);
-  } catch (_) {}
-}
-
-document.querySelectorAll("textarea[data-self-tag]").forEach(seedSelfTag);
