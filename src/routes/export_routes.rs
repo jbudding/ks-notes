@@ -5,6 +5,9 @@ use axum::extract::{Multipart, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 
+use time::OffsetDateTime;
+use time::macros::format_description;
+
 use crate::auth::{self, AuthUser, SessionUser};
 use crate::db;
 use crate::error::{AppError, render};
@@ -53,6 +56,31 @@ pub async fn page(
     render(&export_page_data(&state, &session, None, None).await?)
 }
 
+/// Build a download filename that embeds the selected tags and a UTC timestamp,
+/// e.g. `ks-notes_work-life_2026-06-22_0155.json`. Tags are sanitized to safe
+/// filename characters and the tag portion is length-capped.
+fn export_filename(tags: &[String]) -> String {
+    let mut tagpart: String = tags
+        .iter()
+        .map(|t| {
+            t.chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+    if tagpart.len() > 60 {
+        tagpart.truncate(60);
+    }
+    if tagpart.is_empty() {
+        tagpart.push_str("export");
+    }
+    let stamp = OffsetDateTime::now_utc()
+        .format(format_description!("[year]-[month]-[day]_[hour][minute]"))
+        .unwrap_or_default();
+    format!("ks-notes_{tagpart}_{stamp}.json")
+}
+
 /// Stream the user's notes carrying any of the selected tags as a JSON download.
 /// A plain form post, so the CSRF token rides in a `csrf_token` field and the
 /// repeated `tags` checkboxes are read from the raw key/value pairs.
@@ -75,6 +103,7 @@ pub async fn download(
         return Err(AppError::BadRequest("Select at least one hashtag to export".into()));
     }
 
+    let filename = export_filename(&tags);
     let notes = db::memos::export_by_tags(&state.pool, session.user.id, tags).await?;
     let file = ExportFile { version: 3, notes };
     let json = serde_json::to_string_pretty(&file)
@@ -85,7 +114,7 @@ pub async fn download(
             (CONTENT_TYPE, "application/json".to_string()),
             (
                 CONTENT_DISPOSITION,
-                "attachment; filename=\"ks-notes-export.json\"".to_string(),
+                format!("attachment; filename=\"{filename}\""),
             ),
         ],
         json,

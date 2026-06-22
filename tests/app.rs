@@ -847,3 +847,26 @@ async fn import_stream_reports_status() {
     let body = body_text(app.clone().oneshot(import_req_opts(&s, one, true, "/import/stream")).await.unwrap()).await;
     assert!(body.contains("\"status\":\"merged\""), "merged: {body}");
 }
+
+// The export download filename embeds the selected tags and a date stamp.
+#[tokio::test]
+async fn export_filename_includes_tags_and_date() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "hank", "password123").await.unwrap();
+    create_memo(&app, &s, "note #work", "private").await;
+
+    let resp = app.clone().oneshot(export_req(&s, &["work"])).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cd = resp
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(cd.contains("ks-notes_work_"), "filename has tag: {cd}");
+    assert!(cd.contains(".json"), "json ext: {cd}");
+    // A YYYY-MM-DD date stamp is present.
+    assert!(cd.contains("_20"), "has a date stamp: {cd}");
+}
