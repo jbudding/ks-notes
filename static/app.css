@@ -455,6 +455,17 @@ body.has-expanded-memo { overflow: hidden; }
 .tag-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .tag-check input { width: auto; }
 
+/* Segmented import progress */
+.import-bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; margin: 10px 0; }
+.import-fill { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+.import-log { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.85em; max-height: 260px; overflow: auto; }
+.import-log li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; border-bottom: 1px solid var(--border); }
+.import-log .import-uuid { color: var(--text-muted); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-log .import-stat { font-weight: 600; }
+.import-log li.import-added .import-stat { color: var(--accent); }
+.import-log li.import-merged .import-stat { color: #f59e0b; }
+.import-log li.import-error .import-stat { color: var(--danger); }
+
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
 .table th { color: var(--text-muted); font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.04em; }

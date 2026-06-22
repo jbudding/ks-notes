@@ -817,3 +817,35 @@ async fn tag_sidebar_is_per_feed() {
     assert!(imported.contains("#beta") && !imported.contains("#alpha"), "imported shows imported tags only");
     assert!(imported.contains("href=\"/imported?tag=beta\""), "imported tag links to imported feed");
 }
+
+// The segmented import endpoint reports per-note status by uuid.
+#[tokio::test]
+async fn import_one_reports_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "gwen", "password123").await.unwrap();
+
+    fn one_req(s: &Session, overwrite: bool, uuid: &str, updated: i64) -> Request<Body> {
+        let body = format!(
+            "{{\"overwrite\":{overwrite},\"note\":{{\"uuid\":\"{uuid}\",\"content\":\"c #x\",\"visibility\":\"private\",\"created_at\":1,\"updated_at\":{updated}}}}}"
+        );
+        Request::post("/import/note")
+            .header(header::COOKIE, &s.cookie)
+            .header("X-CSRF-Token", &s.csrf)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    // First time: added.
+    let r = body_text(app.clone().oneshot(one_req(&s, false, "u1", 1000)).await.unwrap()).await;
+    assert!(r.contains("\"status\":\"added\"") && r.contains("\"uuid\":\"u1\""), "{r}");
+
+    // Same/older, no overwrite: skipped.
+    let r = body_text(app.clone().oneshot(one_req(&s, false, "u1", 1000)).await.unwrap()).await;
+    assert!(r.contains("\"status\":\"skipped\""), "{r}");
+
+    // With overwrite: merged.
+    let r = body_text(app.clone().oneshot(one_req(&s, true, "u1", 1000)).await.unwrap()).await;
+    assert!(r.contains("\"status\":\"merged\""), "{r}");
+}

@@ -533,12 +533,116 @@ pub struct ImportSummary {
     pub skipped: usize,
 }
 
-/// Import notes under `user_id`, deduping by `uuid`:
-/// - matches an existing **imported** note → overwrite if `overwrite` is set or
-///   the incoming copy is strictly newer, else skip;
-/// - matches one of the user's **local** (authored) notes → skip (already present);
-/// - no match → insert as a new imported note, preserving timestamps.
-/// Each note's tags are re-derived from its content.
+/// Per-note import outcome (the segmented importer reports one of these per note).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportStatus {
+    /// Inserted as a new imported note.
+    Added,
+    /// Overwrote an existing imported note.
+    Merged,
+    /// No change (already present / not newer / a local authored note).
+    Skipped,
+}
+
+impl ImportStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ImportStatus::Added => "added",
+            ImportStatus::Merged => "merged",
+            ImportStatus::Skipped => "skipped",
+        }
+    }
+}
+
+/// Import a single note within `tx`, deduping by `uuid`:
+/// - matches an existing **imported** note → overwrite (Merged) if `overwrite`
+///   is set or the incoming copy is strictly newer, else Skipped;
+/// - matches one of the user's **local** (authored) notes → Skipped;
+/// - no match → insert as a new imported note (Added), preserving timestamps.
+/// Tags are re-derived from content; attachments get fresh uids with tokens remapped.
+fn import_one_sync(
+    tx: &Connection,
+    user_id: i64,
+    note: &ExportNote,
+    overwrite: bool,
+) -> Result<ImportStatus, AppError> {
+    let content = note.content.trim();
+    if content.is_empty() || note.uuid.trim().is_empty() {
+        return Ok(ImportStatus::Skipped);
+    }
+
+    // Attachments get fresh uids here, so rewrite the note's tokens to match.
+    // A v1/v2 attachment (no uid / no token) gets a token appended.
+    let mut final_content = content.to_string();
+    let mut planned: Vec<(String, &ExportAttachment)> = Vec::new();
+    for att in &note.attachments {
+        let new_uid = crate::auth::new_uid();
+        let new_token = format!("{{{{attach:{new_uid}}}}}");
+        let old_token = format!("{{{{attach:{}}}}}", att.uid);
+        if !att.uid.is_empty() && final_content.contains(&old_token) {
+            final_content = final_content.replace(&old_token, &new_token);
+        } else {
+            final_content.push_str(&format!("\n\n{new_token}"));
+        }
+        planned.push((new_uid, att));
+    }
+
+    // Existing note with this uuid, if any (origin + freshness decide the action).
+    let existing: Option<(i64, String, i64)> = tx
+        .query_row(
+            "SELECT id, origin, updated_at FROM memos WHERE user_id = ?1 AND uuid = ?2",
+            params![user_id, note.uuid],
+            |r| Ok((r.get(0)?, r.get::<_, String>(1)?, r.get(2)?)),
+        )
+        .ok();
+
+    match existing {
+        Some((_, origin, _)) if origin == "local" => Ok(ImportStatus::Skipped),
+        Some((id, _, existing_updated)) => {
+            if overwrite || note.updated_at > existing_updated {
+                tx.execute(
+                    "UPDATE memos SET content = ?1, visibility = ?2,
+                         created_at = ?3, updated_at = ?4
+                     WHERE id = ?5",
+                    params![final_content, note.visibility, note.created_at, note.updated_at, id],
+                )?;
+                sync_tags(tx, id, &final_content)?;
+                // Replace attachments wholesale with the incoming set.
+                tx.execute("DELETE FROM resources WHERE memo_id = ?1", params![id])?;
+                for (uid, att) in &planned {
+                    insert_imported_attachment(tx, id, user_id, uid, att)?;
+                }
+                Ok(ImportStatus::Merged)
+            } else {
+                Ok(ImportStatus::Skipped)
+            }
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO memos
+                   (uid, uuid, user_id, content, visibility, origin, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'imported', ?6, ?7)",
+                params![
+                    crate::auth::new_uid(),
+                    note.uuid,
+                    user_id,
+                    final_content,
+                    note.visibility,
+                    note.created_at,
+                    note.updated_at
+                ],
+            )?;
+            let id = tx.last_insert_rowid();
+            sync_tags(tx, id, &final_content)?;
+            for (uid, att) in &planned {
+                insert_imported_attachment(tx, id, user_id, uid, att)?;
+            }
+            Ok(ImportStatus::Added)
+        }
+    }
+}
+
+/// Bulk import (no-JS fallback): processes every note in one transaction.
 pub async fn import_notes(
     pool: &Pool,
     user_id: i64,
@@ -549,92 +653,31 @@ pub async fn import_notes(
         let tx = conn.transaction()?;
         let mut summary = ImportSummary::default();
         for note in &notes {
-            let content = note.content.trim();
-            if content.is_empty() || note.uuid.trim().is_empty() {
-                summary.skipped += 1;
-                continue;
-            }
-
-            // Attachments get fresh uids here, so rewrite the note's tokens to
-            // match. A v1/v2 attachment (no uid / no token) gets a token appended.
-            let mut final_content = content.to_string();
-            let mut planned: Vec<(String, &ExportAttachment)> = Vec::new();
-            for att in &note.attachments {
-                let new_uid = crate::auth::new_uid();
-                let new_token = format!("{{{{attach:{new_uid}}}}}");
-                let old_token = format!("{{{{attach:{}}}}}", att.uid);
-                if !att.uid.is_empty() && final_content.contains(&old_token) {
-                    final_content = final_content.replace(&old_token, &new_token);
-                } else {
-                    final_content.push_str(&format!("\n\n{new_token}"));
-                }
-                planned.push((new_uid, att));
-            }
-
-            // Existing note with this uuid, if any (origin + freshness decide the action).
-            let existing: Option<(i64, String, i64)> = tx
-                .query_row(
-                    "SELECT id, origin, updated_at FROM memos WHERE user_id = ?1 AND uuid = ?2",
-                    params![user_id, note.uuid],
-                    |r| Ok((r.get(0)?, r.get::<_, String>(1)?, r.get(2)?)),
-                )
-                .ok();
-
-            match existing {
-                Some((_, origin, _)) if origin == "local" => {
-                    summary.skipped += 1;
-                }
-                Some((id, _, existing_updated)) => {
-                    if overwrite || note.updated_at > existing_updated {
-                        tx.execute(
-                            "UPDATE memos SET content = ?1, visibility = ?2,
-                                 created_at = ?3, updated_at = ?4
-                             WHERE id = ?5",
-                            params![
-                                final_content,
-                                note.visibility,
-                                note.created_at,
-                                note.updated_at,
-                                id
-                            ],
-                        )?;
-                        sync_tags(&tx, id, &final_content)?;
-                        // Replace attachments wholesale with the incoming set.
-                        tx.execute("DELETE FROM resources WHERE memo_id = ?1", params![id])?;
-                        for (uid, att) in &planned {
-                            insert_imported_attachment(&tx, id, user_id, uid, att)?;
-                        }
-                        summary.updated += 1;
-                    } else {
-                        summary.skipped += 1;
-                    }
-                }
-                None => {
-                    tx.execute(
-                        "INSERT INTO memos
-                           (uid, uuid, user_id, content, visibility, origin, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, 'imported', ?6, ?7)",
-                        params![
-                            crate::auth::new_uid(),
-                            note.uuid,
-                            user_id,
-                            final_content,
-                            note.visibility,
-                            note.created_at,
-                            note.updated_at
-                        ],
-                    )?;
-                    let id = tx.last_insert_rowid();
-                    sync_tags(&tx, id, &final_content)?;
-                    for (uid, att) in &planned {
-                        insert_imported_attachment(&tx, id, user_id, uid, att)?;
-                    }
-                    summary.inserted += 1;
-                }
+            match import_one_sync(&tx, user_id, note, overwrite)? {
+                ImportStatus::Added => summary.inserted += 1,
+                ImportStatus::Merged => summary.updated += 1,
+                ImportStatus::Skipped => summary.skipped += 1,
             }
         }
         tx.commit()?;
         Ok(summary)
+    })
+    .await
+}
+
+/// Import one note in its own transaction — used by the segmented importer so
+/// the client can report per-note progress and status.
+pub async fn import_note(
+    pool: &Pool,
+    user_id: i64,
+    note: ExportNote,
+    overwrite: bool,
+) -> Result<ImportStatus, AppError> {
+    crate::db::run(pool, move |conn| {
+        let tx = conn.transaction()?;
+        let status = import_one_sync(&tx, user_id, &note, overwrite)?;
+        tx.commit()?;
+        Ok(status)
     })
     .await
 }

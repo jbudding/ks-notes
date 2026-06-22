@@ -1,13 +1,14 @@
 use askama::Template;
-use axum::Form;
 use axum::extract::{Multipart, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
+use axum::{Form, Json};
+use serde::Deserialize;
 
-use crate::auth::{self, AuthUser, SessionUser};
+use crate::auth::{self, AuthUser, CsrfGuard, SessionUser};
 use crate::db;
 use crate::error::{AppError, render};
-use crate::models::{ExportFile, TagCount};
+use crate::models::{ExportFile, ExportNote, TagCount};
 use crate::state::AppState;
 
 #[derive(Template)]
@@ -90,6 +91,24 @@ pub async fn download(
         json,
     )
         .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct ImportOneBody {
+    overwrite: bool,
+    note: ExportNote,
+}
+
+/// Segmented import: process a single note and report its status, so the client
+/// can show "n of X" progress with a per-note added/merged/skipped result.
+pub async fn import_one(
+    State(state): State<AppState>,
+    CsrfGuard(session): CsrfGuard,
+    Json(body): Json<ImportOneBody>,
+) -> Result<Response, AppError> {
+    let uuid = body.note.uuid.clone();
+    let status = db::memos::import_note(&state.pool, session.user.id, body.note, body.overwrite).await?;
+    Ok(Json(serde_json::json!({ "uuid": uuid, "status": status.as_str() })).into_response())
 }
 
 /// Import a previously exported JSON file. Multipart upload, so the CSRF token

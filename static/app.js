@@ -73,6 +73,91 @@ document.addEventListener("keydown", function (e) {
   if (card) setExpanded(card, false);
 });
 
+// --- Segmented import --------------------------------------------------------
+// Parse the export file in the browser and POST one note at a time to
+// /import/note, showing "n of X" progress and each note's uuid + status
+// (added / merged / skipped). Falls back to the plain multipart /import when
+// the File API is unavailable.
+function importSegmented(form, file) {
+  var csrfEl = form.querySelector('input[name=csrf_token]');
+  var csrf = csrfEl ? csrfEl.value : "";
+  var owEl = form.querySelector('input[name=overwrite]');
+  var overwrite = !!(owEl && owEl.checked);
+  var progress = document.getElementById("import-progress");
+  var fill = document.getElementById("import-fill");
+  var status = document.getElementById("import-status");
+  var log = document.getElementById("import-log");
+  var btn = form.querySelector("button[type=submit]");
+
+  var reader = new FileReader();
+  reader.onload = function () {
+    var notes;
+    try {
+      notes = (JSON.parse(reader.result) || {}).notes || [];
+    } catch (_) {
+      alert("Couldn't read that file as a ks-notes export.");
+      return;
+    }
+    if (!notes.length) {
+      alert("No notes found in that file.");
+      return;
+    }
+
+    progress.hidden = false;
+    log.innerHTML = "";
+    fill.style.width = "0%";
+    if (btn) btn.disabled = true;
+    var total = notes.length;
+    var counts = { added: 0, merged: 0, skipped: 0, error: 0 };
+
+    function finish() {
+      status.textContent =
+        "Done — " + counts.added + " added, " + counts.merged + " merged, " + counts.skipped + " skipped" +
+        (counts.error ? ", " + counts.error + " failed" : "") + ".";
+      if (btn) btn.disabled = false;
+    }
+
+    function step(i) {
+      if (i >= total) return finish();
+      status.textContent = "Processing " + (i + 1) + " of " + total + " notes…";
+      fetch("/import/note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ overwrite: overwrite, note: notes[i] }),
+      })
+        .then(function (r) {
+          return r.ok ? r.json() : { uuid: notes[i].uuid || "?", status: "error" };
+        })
+        .catch(function () {
+          return { uuid: notes[i].uuid || "?", status: "error" };
+        })
+        .then(function (res) {
+          if (counts[res.status] !== undefined) counts[res.status]++;
+          fill.style.width = Math.round(((i + 1) / total) * 100) + "%";
+          var li = document.createElement("li");
+          li.className = "import-" + res.status;
+          li.innerHTML = '<span class="import-uuid"></span><span class="import-stat"></span>';
+          li.querySelector(".import-uuid").textContent = res.uuid;
+          li.querySelector(".import-stat").textContent = res.status;
+          log.appendChild(li);
+          step(i + 1);
+        });
+    }
+    step(0);
+  };
+  reader.readAsText(file);
+}
+
+document.addEventListener("submit", function (e) {
+  var form = e.target;
+  if (!form || form.id !== "import-form" || !window.FileReader) return;
+  var input = form.querySelector('input[type=file]');
+  var file = input && input.files && input.files[0];
+  if (!file) return; // let the required attribute handle the empty case
+  e.preventDefault();
+  importSegmented(form, file);
+});
+
 // --- Inline attachments ------------------------------------------------------
 // Selecting files uploads each to /resources; on success a {{attach:UID}} token
 // is placed in the note at the cursor (the "attachment point"), so attachments

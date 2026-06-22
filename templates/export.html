@@ -43,7 +43,7 @@
         new ones are added, newer versions overwrite, and notes you already have
         are skipped — no duplicates. Imported notes live under
         <a href="/imported">Imported</a>.</p>
-      <form method="post" action="/import" enctype="multipart/form-data">
+      <form id="import-form" method="post" action="/import" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="file" name="file" accept=".json,application/json" required>
         <p>
@@ -54,6 +54,11 @@
         </p>
         <p><button type="submit" class="btn-primary">Import</button></p>
       </form>
+      <div id="import-progress" hidden>
+        <div class="import-bar"><i class="import-fill" id="import-fill"></i></div>
+        <p class="muted" id="import-status"></p>
+        <ul class="import-log" id="import-log"></ul>
+      </div>
     </div>
   </main>
 </div>
