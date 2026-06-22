@@ -598,12 +598,22 @@ fn export_req(s: &Session, tags: &[&str]) -> Request<Body> {
 }
 
 fn import_req(s: &Session, json: &str) -> Request<Body> {
+    import_req_opts(s, json, false)
+}
+
+fn import_req_opts(s: &Session, json: &str, overwrite: bool) -> Request<Body> {
     let boundary = "IMPORTBOUNDARY";
     let mut body = Vec::new();
     body.extend_from_slice(
         format!("--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{}\r\n", s.csrf)
             .as_bytes(),
     );
+    if overwrite {
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n")
+                .as_bytes(),
+        );
+    }
     body.extend_from_slice(
         format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"export.json\"\r\nContent-Type: application/json\r\n\r\n")
             .as_bytes(),
@@ -756,4 +766,29 @@ async fn import_replaces_attachments_on_overwrite() {
     assert!(page.contains("updated 1"), "{page}");
     let imported = body_text(get(&app, &s, "/imported").await).await;
     assert!(imported.contains("b.txt") && !imported.contains("a.txt"), "old attachment replaced: {imported}");
+}
+
+// The import "overwrite existing notes" option (off by default) forces an
+// existing imported note to be replaced even when the incoming copy isn't newer.
+#[tokio::test]
+async fn import_overwrite_option_forces_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "erin", "password123").await.unwrap();
+
+    let v1 = r#"{"version":3,"notes":[{"uuid":"ow-uuid","content":"first #x","visibility":"private","created_at":1000,"updated_at":1000}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, v1)).await.unwrap()).await;
+    assert!(page.contains("Imported 1 new"), "{page}");
+
+    // Same/older timestamp without the option -> skipped.
+    let older = r#"{"version":3,"notes":[{"uuid":"ow-uuid","content":"changed #x","visibility":"private","created_at":1000,"updated_at":1000}]}"#;
+    let page = body_text(app.clone().oneshot(import_req(&s, older)).await.unwrap()).await;
+    assert!(page.contains("skipped 1"), "default keeps existing: {page}");
+    assert!(body_text(get(&app, &s, "/imported").await).await.contains("first"));
+
+    // With the option on -> overwritten despite not being newer.
+    let page = body_text(app.clone().oneshot(import_req_opts(&s, older, true)).await.unwrap()).await;
+    assert!(page.contains("updated 1"), "overwrite option should replace: {page}");
+    let imported = body_text(get(&app, &s, "/imported").await).await;
+    assert!(imported.contains("changed") && !imported.contains("first"), "content replaced: {imported}");
 }

@@ -97,6 +97,7 @@ pub async fn import(
 ) -> Result<Response, AppError> {
     let mut csrf = String::new();
     let mut data: Vec<u8> = Vec::new();
+    let mut overwrite = false;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -108,6 +109,13 @@ pub async fn import(
                     .text()
                     .await
                     .map_err(|e| AppError::BadRequest(format!("import: {e}")))?;
+            }
+            Some("overwrite") => {
+                overwrite = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("import: {e}")))?
+                    == "true";
             }
             Some("file") => {
                 data = field
@@ -124,7 +132,7 @@ pub async fn import(
     let parsed: Result<ExportFile, _> = serde_json::from_slice(&data);
     let page = match parsed {
         Ok(file) => {
-            let s = db::memos::import_notes(&state.pool, session.user.id, file.notes).await?;
+            let s = db::memos::import_notes(&state.pool, session.user.id, file.notes, overwrite).await?;
             let msg = format!(
                 "Imported {} new, updated {}, skipped {}.",
                 s.inserted, s.updated, s.skipped

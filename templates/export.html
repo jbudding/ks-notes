@@ -46,6 +46,12 @@
       <form method="post" action="/import" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="file" name="file" accept=".json,application/json" required>
+        <p>
+          <label class="tag-check">
+            <input type="checkbox" name="overwrite" value="true">
+            Overwrite existing notes (otherwise only newer versions replace them)
+          </label>
+        </p>
         <p><button type="submit" class="btn-primary">Import</button></p>
       </form>
     </div>

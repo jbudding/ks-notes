@@ -513,7 +513,8 @@ pub struct ImportSummary {
 }
 
 /// Import notes under `user_id`, deduping by `uuid`:
-/// - matches an existing **imported** note → overwrite iff strictly newer, else skip;
+/// - matches an existing **imported** note → overwrite if `overwrite` is set or
+///   the incoming copy is strictly newer, else skip;
 /// - matches one of the user's **local** (authored) notes → skip (already present);
 /// - no match → insert as a new imported note, preserving timestamps.
 /// Each note's tags are re-derived from its content.
@@ -521,6 +522,7 @@ pub async fn import_notes(
     pool: &Pool,
     user_id: i64,
     notes: Vec<ExportNote>,
+    overwrite: bool,
 ) -> Result<ImportSummary, AppError> {
     crate::db::run(pool, move |conn| {
         let tx = conn.transaction()?;
@@ -562,7 +564,7 @@ pub async fn import_notes(
                     summary.skipped += 1;
                 }
                 Some((id, _, existing_updated)) => {
-                    if note.updated_at > existing_updated {
+                    if overwrite || note.updated_at > existing_updated {
                         tx.execute(
                             "UPDATE memos SET content = ?1, visibility = ?2,
                                  created_at = ?3, updated_at = ?4
