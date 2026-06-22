@@ -7,7 +7,6 @@ use serde::Deserialize;
 use crate::auth::{self, AdminUser, AuthUser, SessionUser};
 use crate::db;
 use crate::error::{AppError, render};
-use crate::models::TagCount;
 use crate::state::AppState;
 use crate::views::format_times;
 
@@ -28,10 +27,6 @@ struct SettingsPage {
     nav_active: &'static str,
     counts: crate::models::NoteCounts,
     sections: Vec<crate::models::Section>,
-    tags: Vec<TagCount>,
-    tags_label: String,
-    tags_path: String,
-    tag_filter: Option<String>,
     tokens: Vec<TokenRow>,
     message: Option<String>,
     error: Option<String>,
@@ -66,10 +61,6 @@ async fn settings_page_data(
         nav_active: "settings",
         counts: db::memos::note_counts(&state.pool, session.user.id).await?,
         sections: db::sections::list(&state.pool, session.user.id).await?,
-        tags: db::memos::tag_counts(&state.pool, session.user.id, db::memos::TagScope::Home).await?,
-        tags_label: "Home".into(),
-        tags_path: "/".into(),
-        tag_filter: None,
         tokens,
         message,
         error,
@@ -205,10 +196,6 @@ struct AdminPage {
     nav_active: &'static str,
     counts: crate::models::NoteCounts,
     sections: Vec<crate::models::Section>,
-    tags: Vec<TagCount>,
-    tags_label: String,
-    tags_path: String,
-    tag_filter: Option<String>,
     allow_registration: bool,
     users: Vec<UserRow>,
 }
@@ -243,10 +230,6 @@ pub async fn admin(
         nav_active: "admin",
         counts: db::memos::note_counts(&state.pool, session.user.id).await?,
         sections: db::sections::list(&state.pool, session.user.id).await?,
-        tags: db::memos::tag_counts(&state.pool, session.user.id, db::memos::TagScope::Home).await?,
-        tags_label: "Home".into(),
-        tags_path: "/".into(),
-        tag_filter: None,
         allow_registration,
         users,
     })

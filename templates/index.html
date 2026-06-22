@@ -5,7 +5,7 @@
 {% block body_attrs %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endblock %}
 
 {% block content %}
-<div class="app">
+<div class="app app--feed">
   {% include "partials/sidebar.html" %}
   <main>
     {% if let Some(act) = activity %}
@@ -63,5 +63,9 @@
       {% include "partials/memo_list.html" %}
     </div>
   </main>
+  <aside class="tagbar">
+    {% let oob = false %}
+    {% include "partials/tag_sidebar.html" %}
+  </aside>
 </div>
 {% endblock %}

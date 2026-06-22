@@ -24,9 +24,6 @@ struct ExportPage {
     counts: crate::models::NoteCounts,
     sections: Vec<crate::models::Section>,
     tags: Vec<TagCount>,
-    tags_label: String,
-    tags_path: String,
-    tag_filter: Option<String>,
     message: Option<String>,
     error: Option<String>,
 }
@@ -45,9 +42,6 @@ async fn export_page_data(
         counts: db::memos::note_counts(&state.pool, session.user.id).await?,
         sections: db::sections::list(&state.pool, session.user.id).await?,
         tags: db::memos::tag_counts(&state.pool, session.user.id, db::memos::TagScope::Home).await?,
-        tags_label: "Home".into(),
-        tags_path: "/".into(),
-        tag_filter: None,
         message,
         error,
     })

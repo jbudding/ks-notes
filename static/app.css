@@ -50,7 +50,17 @@ a:hover { text-decoration: underline; }
 
 .app > main { min-width: 0; }
 
-.sidebar { position: sticky; top: 24px; align-self: start; }
+/* Feed pages get a third column on the right for the tag panel. */
+.app--feed { grid-template-columns: 220px minmax(0, 1fr) 240px; }
+
+.sidebar, .tagbar { position: sticky; top: 24px; align-self: start; }
+.tagbar h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0 0 6px 10px;
+}
 
 .brand {
   font-size: 1.2rem;
@@ -126,8 +136,8 @@ a:hover { text-decoration: underline; }
 }
 
 @media (max-width: 760px) {
-  .app { grid-template-columns: minmax(0, 1fr); padding: 12px; }
-  .sidebar { position: static; }
+  .app, .app--feed { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .sidebar, .tagbar { position: static; }
 }
 
 /* ---------- Search & filter controls ---------- */
