@@ -25,6 +25,7 @@ pub fn router(state: AppState) -> Router {
     };
     Router::new()
         .route("/", get(pages::home))
+        .route("/global", get(pages::global))
         .route("/explore", get(pages::explore))
         .route("/archive", get(pages::archive))
         .route("/imported", get(pages::imported))

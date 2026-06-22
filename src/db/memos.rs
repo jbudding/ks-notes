@@ -237,6 +237,8 @@ pub enum Feed {
     Imported(i64),
     /// The owner's notes assigned to a specific section.
     Section { user_id: i64, section_id: i64 },
+    /// All the owner's active notes, across every bucket (Home, sections, Imported).
+    Global(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -282,6 +284,10 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
                 wheres.push("m.user_id = ? AND m.state = 'normal' AND m.section_id = ?".into());
                 binds.push(Value::Integer(*user_id));
                 binds.push(Value::Integer(*section_id));
+            }
+            Feed::Global(user_id) => {
+                wheres.push("m.user_id = ? AND m.state = 'normal'".into());
+                binds.push(Value::Integer(*user_id));
             }
             Feed::Archive(user_id) => {
                 wheres.push("m.user_id = ? AND m.state = 'archived'".into());
@@ -379,6 +385,8 @@ pub enum TagScope {
     Imported,
     /// A specific user section.
     Section(i64),
+    /// Every active note the user has, across all buckets (Global).
+    All,
 }
 
 /// Tag counts for the sidebar, scoped to the active feed's bucket.
@@ -392,6 +400,7 @@ pub async fn tag_counts(
             TagScope::Home => ("m.origin = 'local' AND m.section_id IS NULL", 0),
             TagScope::Imported => ("m.origin = 'imported'", 0),
             TagScope::Section(sid) => ("m.section_id = ?2", sid),
+            TagScope::All => ("1 = 1", 0),
         };
         let sql = format!(
             "SELECT t.tag, COUNT(*) FROM memo_tags t

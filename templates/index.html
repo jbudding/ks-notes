@@ -23,11 +23,13 @@
              hx-get="{{ feed_path }}" hx-trigger="input changed delay:300ms, search"
              hx-target="#memo-list" hx-push-url="true" hx-include=".month-filter"
              {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+      {% if let Some(_) = activity %}
       <input class="month-filter" type="month" name="date" aria-label="Filter by month"
              value="{% if let Some(d) = date_filter %}{{ d }}{% endif %}"
              hx-get="{{ feed_path }}" hx-trigger="change"
              hx-target="#memo-list" hx-push-url="true" hx-include=".search-box"
              {% if let Some(t) = tag_filter %}hx-vals='{"tag": "{{ t }}"}'{% endif %}>
+      {% endif %}
     </div>
 
     {% if let Some(d) = date_filter %}

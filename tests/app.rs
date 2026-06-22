@@ -943,3 +943,50 @@ async fn sections_create_compose_move_delete() {
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     assert!(!body_text(get(&app, &s, "/").await).await.contains(">Work<"), "section removed");
 }
+
+// Global spans every bucket (Home + sections + imported), carries the activity
+// tracker + date dropdown, and its search reaches across buckets.
+#[tokio::test]
+async fn global_feed_spans_all_buckets() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "june", "password123").await.unwrap();
+
+    // A Home note.
+    create_memo(&app, &s, "home memo alpha", "private").await;
+    // A section with a note composed into it.
+    let resp = app
+        .clone()
+        .oneshot(form_req("/sections", Some(&s.cookie), &format!("csrf_token={}&name=Proj", s.csrf)))
+        .await
+        .unwrap();
+    let sid: i64 = resp.headers()[header::LOCATION].to_str().unwrap().trim_start_matches("/s/").parse().unwrap();
+    app.clone()
+        .oneshot(
+            Request::post("/memos")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::from(format!("content=section+memo+beta&visibility=private&section_id={sid}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    // An imported note.
+    let imp = r#"{"version":3,"notes":[{"uuid":"g1","content":"imported memo gamma","visibility":"private","created_at":1,"updated_at":1}]}"#;
+    app.clone().oneshot(import_req(&s, imp)).await.unwrap();
+
+    // Global shows all three buckets; Home shows only its own note.
+    let g = body_text(get(&app, &s, "/global").await).await;
+    assert!(g.contains("home memo alpha") && g.contains("section memo beta") && g.contains("imported memo gamma"), "global spans buckets");
+    let h = body_text(get(&app, &s, "/").await).await;
+    assert!(h.contains("home memo alpha") && !h.contains("section memo beta") && !h.contains("imported memo gamma"), "home is just Home");
+
+    // Global search reaches across buckets.
+    let gs = body_text(get(&app, &s, "/global?q=gamma").await).await;
+    assert!(gs.contains("imported memo gamma") && !gs.contains("home memo alpha"), "global search spans buckets");
+
+    // Tracker + date dropdown live on Global, not Home.
+    assert!(g.contains("class=\"activity card\"") && g.contains("class=\"month-filter\""), "global has tracker + date");
+    assert!(!h.contains("class=\"activity card\"") && !h.contains("class=\"month-filter\""), "home has neither");
+}

@@ -153,10 +153,38 @@ pub async fn home(
             title: "Home".into(),
             path: "/".into(),
             composer: true,
-            activity: true,
+            activity: false,
             tag_scope: db::memos::TagScope::Home,
             tags_label: "Home".into(),
             tags_path: "/".into(),
+            active_section: None,
+        },
+    )
+    .await
+}
+
+pub async fn global(
+    State(state): State<AppState>,
+    AuthUser(session): AuthUser,
+    headers: HeaderMap,
+    Query(p): Query<FeedParams>,
+) -> Result<Response, AppError> {
+    let feed = Feed::Global(session.user.id);
+    feed_response(
+        &state,
+        &session,
+        &headers,
+        p,
+        feed,
+        FeedCfg {
+            nav: "global",
+            title: "Global".into(),
+            path: "/global".into(),
+            composer: false,
+            activity: true,
+            tag_scope: db::memos::TagScope::All,
+            tags_label: "All".into(),
+            tags_path: "/global".into(),
             active_section: None,
         },
     )
