@@ -79,8 +79,20 @@ pub struct Memo {
     pub pinned: bool,
     pub state: MemoState,
     pub origin: MemoOrigin,
+    pub section_id: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// A user-defined sidebar section, with its active-note count.
+#[derive(Debug, Clone)]
+pub struct Section {
+    pub id: i64,
+    pub name: String,
+    pub count: i64,
+    /// Marks the current feed's section (sidebar highlight) or the editing
+    /// note's section (editor select) — set by the caller, not the query.
+    pub active: bool,
 }
 
 /// One attachment in the export/import JSON file. `data` is base64 (standard

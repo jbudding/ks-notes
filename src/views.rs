@@ -20,6 +20,8 @@ pub struct MemoView {
     pub created_iso: String,
     pub created_display: String,
     pub can_edit: bool,
+    pub section_id: Option<i64>,
+    pub is_imported: bool,
 }
 
 /// Human-readable attachment size limit for the composer's paperclip tooltip.
@@ -64,6 +66,8 @@ pub fn memo_view(memo: &Memo, viewer: Option<&User>, attachments: Vec<ResourceMe
         created_iso,
         created_display,
         can_edit: viewer.map(|u| u.id == memo.user_id).unwrap_or(false),
+        section_id: memo.section_id,
+        is_imported: memo.origin == crate::models::MemoOrigin::Imported,
     }
 }
 

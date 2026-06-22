@@ -25,14 +25,17 @@ struct IndexPage {
     csrf_token: String,
     nav_active: &'static str,
     counts: crate::models::NoteCounts,
+    sections: Vec<crate::models::Section>,
     tags: Vec<TagCount>,
-    tags_scope: &'static str,
+    tags_label: String,
+    tags_path: String,
     tag_filter: Option<String>,
     q: Option<String>,
     show_composer: bool,
+    composer_section: Option<i64>,
     upload_limit: String,
-    feed_title: &'static str,
-    feed_path: &'static str,
+    feed_title: String,
+    feed_path: String,
     date_filter: Option<String>,
     activity: Option<ActivityGrid>,
     pinned: Vec<MemoView>,
@@ -49,7 +52,7 @@ struct MemoListFrag {
     tag_filter: Option<String>,
     q: Option<String>,
     date_filter: Option<String>,
-    feed_path: &'static str,
+    feed_path: String,
 }
 
 #[derive(Template)]
@@ -60,7 +63,7 @@ struct FeedItemsFrag {
     tag_filter: Option<String>,
     q: Option<String>,
     date_filter: Option<String>,
-    feed_path: &'static str,
+    feed_path: String,
 }
 
 #[derive(Template)]
@@ -81,11 +84,17 @@ pub struct FeedParams {
 
 struct FeedCfg {
     nav: &'static str,
-    title: &'static str,
-    path: &'static str,
+    title: String,
+    path: String,
     composer: bool,
     /// Show the activity heatmap + month picker (the owner's own timeline only).
     activity: bool,
+    /// Which bucket's tags the sidebar lists, plus its label and link base.
+    tag_scope: db::memos::TagScope,
+    tags_label: String,
+    tags_path: String,
+    /// Set on a section feed, for nav highlight + seeding the composer.
+    active_section: Option<i64>,
 }
 
 fn parse_before(s: &str) -> Option<(i64, i64)> {
@@ -141,10 +150,14 @@ pub async fn home(
         feed,
         FeedCfg {
             nav: "home",
-            title: "Home",
-            path: "/",
+            title: "Home".into(),
+            path: "/".into(),
             composer: true,
             activity: true,
+            tag_scope: db::memos::TagScope::Home,
+            tags_label: "Home".into(),
+            tags_path: "/".into(),
+            active_section: None,
         },
     )
     .await
@@ -164,10 +177,14 @@ pub async fn explore(
         Feed::Explore { signed_in: true },
         FeedCfg {
             nav: "explore",
-            title: "Explore",
-            path: "/explore",
+            title: "Explore".into(),
+            path: "/explore".into(),
             composer: false,
             activity: false,
+            tag_scope: db::memos::TagScope::Home,
+            tags_label: "Home".into(),
+            tags_path: "/".into(),
+            active_section: None,
         },
     )
     .await
@@ -188,10 +205,14 @@ pub async fn archive(
         feed,
         FeedCfg {
             nav: "archive",
-            title: "Archive",
-            path: "/archive",
+            title: "Archive".into(),
+            path: "/archive".into(),
             composer: false,
             activity: false,
+            tag_scope: db::memos::TagScope::Home,
+            tags_label: "Home".into(),
+            tags_path: "/".into(),
+            active_section: None,
         },
     )
     .await
@@ -212,10 +233,45 @@ pub async fn imported(
         feed,
         FeedCfg {
             nav: "imported",
-            title: "Imported",
-            path: "/imported",
+            title: "Imported".into(),
+            path: "/imported".into(),
             composer: false,
             activity: false,
+            tag_scope: db::memos::TagScope::Imported,
+            tags_label: "Imported".into(),
+            tags_path: "/imported".into(),
+            active_section: None,
+        },
+    )
+    .await
+}
+
+pub async fn section(
+    State(state): State<AppState>,
+    AuthUser(session): AuthUser,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Query(p): Query<FeedParams>,
+) -> Result<Response, AppError> {
+    // 404 if the section isn't the viewer's.
+    let name = db::sections::name(&state.pool, session.user.id, id).await?;
+    let feed = Feed::Section { user_id: session.user.id, section_id: id };
+    feed_response(
+        &state,
+        &session,
+        &headers,
+        p,
+        feed,
+        FeedCfg {
+            nav: "section",
+            title: name.clone(),
+            path: format!("/s/{id}"),
+            composer: true,
+            activity: false,
+            tag_scope: db::memos::TagScope::Section(id),
+            tags_label: name,
+            tags_path: format!("/s/{id}"),
+            active_section: Some(id),
         },
     )
     .await
@@ -292,14 +348,14 @@ async fn feed_response(
             feed_path: cfg.path,
         })
     } else {
-        // The Imported feed shows imported-note tags; every other feed the local set.
-        let (tags_origin, tags_scope) = if cfg.nav == "imported" {
-            (crate::models::MemoOrigin::Imported, "imported")
-        } else {
-            (crate::models::MemoOrigin::Local, "home")
-        };
-        let tags = db::memos::tag_counts(&state.pool, session.user.id, tags_origin).await?;
+        let tags = db::memos::tag_counts(&state.pool, session.user.id, cfg.tag_scope).await?;
         let nav_counts = db::memos::note_counts(&state.pool, session.user.id).await?;
+        let mut sections = db::sections::list(&state.pool, session.user.id).await?;
+        if let Some(active) = cfg.active_section {
+            for s in sections.iter_mut() {
+                s.active = s.id == active;
+            }
+        }
         // Heatmap over roughly the last year of the owner's own notes.
         let activity = if cfg.activity {
             let since = (OffsetDateTime::now_utc() - Duration::days(400)).unix_timestamp();
@@ -318,11 +374,14 @@ async fn feed_response(
             csrf_token: session.csrf_token.clone(),
             nav_active: cfg.nav,
             counts: nav_counts,
+            sections,
             tags,
-            tags_scope,
+            tags_label: cfg.tags_label,
+            tags_path: cfg.tags_path,
             tag_filter: tag,
             q,
             show_composer: cfg.composer,
+            composer_section: cfg.active_section,
             upload_limit: crate::views::upload_limit_label(state.config.max_upload_mb),
             feed_title: cfg.title,
             feed_path: cfg.path,

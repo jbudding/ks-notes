@@ -140,7 +140,7 @@ pub async fn create_memo(
         .as_deref()
         .and_then(Visibility::parse)
         .unwrap_or(Visibility::Private);
-    let memo = db::memos::create(&state.pool, user.id, content, visibility).await?;
+    let memo = db::memos::create(&state.pool, user.id, content, visibility, None).await?;
     Ok((StatusCode::CREATED, Json(ApiMemo::from(memo))).into_response())
 }
 
@@ -226,7 +226,7 @@ pub async fn tags(
     State(state): State<AppState>,
     ApiUser(user): ApiUser,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let tags = db::memos::tag_counts(&state.pool, user.id, crate::models::MemoOrigin::Local).await?;
+    let tags = db::memos::tag_counts(&state.pool, user.id, db::memos::TagScope::Home).await?;
     let items: Vec<_> = tags
         .into_iter()
         .map(|t| json!({"tag": t.tag, "count": t.count}))

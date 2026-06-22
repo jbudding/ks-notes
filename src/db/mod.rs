@@ -1,5 +1,6 @@
 pub mod memos;
 pub mod resources;
+pub mod sections;
 pub mod sessions;
 pub mod settings;
 pub mod tokens;
@@ -124,6 +125,21 @@ UPDATE memos SET content = content ||
   (SELECT group_concat(char(10) || char(10) || '{{attach:' || r.uid || '}}', '')
    FROM resources r WHERE r.memo_id = memos.id)
 WHERE id IN (SELECT memo_id FROM resources WHERE memo_id IS NOT NULL);
+"#,
+    // 004 — user-defined sections (exclusive buckets). A local note with a
+    // section_id belongs to that section instead of Home; deleting a section
+    // returns its notes to Home (ON DELETE SET NULL).
+    r#"
+CREATE TABLE sections (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE (user_id, name)
+);
+ALTER TABLE memos ADD COLUMN section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL;
+CREATE INDEX idx_memos_section ON memos(section_id, state, created_at DESC);
 "#,
 ];
 

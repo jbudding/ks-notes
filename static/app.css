@@ -81,6 +81,21 @@ a:hover { text-decoration: underline; }
 .nav-count { margin-left: auto; color: var(--text-muted); font-size: 0.85em; }
 .nav a.active .nav-count { color: var(--accent); }
 
+/* Sidebar sections */
+.nav-sections { margin-bottom: 20px; }
+.nav-sections h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin: 0 0 6px; }
+.section-row { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 8px; }
+.section-row.active { background: var(--accent-soft); }
+.section-row a { flex: 1; color: var(--text); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-row.active a { color: var(--accent); }
+.section-row .nav-count { margin-left: 0; }
+.section-row form { display: inline; }
+.section-del { padding: 0 4px; opacity: 0; }
+.section-row:hover .section-del { opacity: 0.6; }
+.section-del:hover { opacity: 1; color: var(--danger); }
+.add-section { display: flex; gap: 4px; margin-top: 6px; }
+.add-section input { flex: 1; min-width: 0; font-size: 0.9em; padding: 4px 8px; }
+
 .sidebar h3 {
   font-size: 0.75rem;
   text-transform: uppercase;

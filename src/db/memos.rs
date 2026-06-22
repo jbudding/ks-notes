@@ -8,7 +8,7 @@ use data_encoding::BASE64;
 use crate::models::{ExportAttachment, ExportNote, Memo, MemoState, NoteCounts, TagCount, Visibility};
 
 const MEMO_COLS: &str = "m.id, m.uid, m.user_id, u.username, m.content, m.visibility,
-                         m.pinned, m.state, m.created_at, m.updated_at, m.uuid, m.origin";
+                         m.pinned, m.state, m.created_at, m.updated_at, m.uuid, m.origin, m.section_id";
 
 fn memo_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Memo> {
     Ok(Memo {
@@ -24,6 +24,7 @@ fn memo_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Memo> {
         updated_at: r.get(9)?,
         uuid: r.get(10)?,
         origin: r.get(11)?,
+        section_id: r.get(12)?,
     })
 }
 
@@ -98,15 +99,26 @@ pub async fn create(
     user_id: i64,
     content: String,
     visibility: Visibility,
+    section_id: Option<i64>,
 ) -> Result<Memo, AppError> {
     let uid = crate::auth::new_uid();
     let uuid = crate::auth::new_uuid();
     crate::db::run(pool, move |conn| {
         let resource_uids = crate::markdown::extract_attachment_refs(&content);
         let tx = conn.transaction()?;
+        // Only honor a section the user actually owns.
+        let section_id = section_id.filter(|sid| {
+            tx.query_row(
+                "SELECT 1 FROM sections WHERE id = ?1 AND user_id = ?2",
+                params![sid, user_id],
+                |_| Ok(()),
+            )
+            .is_ok()
+        });
         tx.execute(
-            "INSERT INTO memos (uid, uuid, user_id, content, visibility) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![uid, uuid, user_id, content, visibility],
+            "INSERT INTO memos (uid, uuid, user_id, content, visibility, section_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![uid, uuid, user_id, content, visibility, section_id],
         )?;
         let id = tx.last_insert_rowid();
         sync_tags(&tx, id, &content)?;
@@ -223,6 +235,8 @@ pub enum Feed {
     Explore { signed_in: bool },
     /// The owner's imported memos (origin='imported'), kept out of every other feed.
     Imported(i64),
+    /// The owner's notes assigned to a specific section.
+    Section { user_id: i64, section_id: i64 },
 }
 
 #[derive(Debug, Clone)]
@@ -259,8 +273,15 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
 
         match &query.feed {
             Feed::Own(user_id) => {
-                wheres.push("m.user_id = ? AND m.state = 'normal' AND m.origin = 'local'".into());
+                wheres.push(
+                    "m.user_id = ? AND m.state = 'normal' AND m.origin = 'local' AND m.section_id IS NULL".into(),
+                );
                 binds.push(Value::Integer(*user_id));
+            }
+            Feed::Section { user_id, section_id } => {
+                wheres.push("m.user_id = ? AND m.state = 'normal' AND m.section_id = ?".into());
+                binds.push(Value::Integer(*user_id));
+                binds.push(Value::Integer(*section_id));
             }
             Feed::Archive(user_id) => {
                 wheres.push("m.user_id = ? AND m.state = 'archived'".into());
@@ -314,7 +335,8 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
             };
             let mut stmt = conn.prepare(&format!(
                 "SELECT {MEMO_COLS} FROM memos m JOIN users u ON u.id = m.user_id
-                 WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = 'local' AND m.pinned = 1
+                 WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = 'local'
+                   AND m.section_id IS NULL AND m.pinned = 1
                  ORDER BY m.created_at DESC, m.id DESC"
             ))?;
             stmt.query_map([user_id], memo_from_row)?
@@ -348,39 +370,55 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
     .await
 }
 
-/// Tag counts for the sidebar — the viewer's active memos of the given origin
-/// (local = Home, imported = Imported).
+/// Which bucket a sidebar tag list is scoped to.
+#[derive(Debug, Clone, Copy)]
+pub enum TagScope {
+    /// Home: local notes not in any section.
+    Home,
+    /// The Imported feed.
+    Imported,
+    /// A specific user section.
+    Section(i64),
+}
+
+/// Tag counts for the sidebar, scoped to the active feed's bucket.
 pub async fn tag_counts(
     pool: &Pool,
     user_id: i64,
-    origin: crate::models::MemoOrigin,
+    scope: TagScope,
 ) -> Result<Vec<TagCount>, AppError> {
     crate::db::run(pool, move |conn| {
-        let mut stmt = conn.prepare(
+        let (cond, extra): (&str, i64) = match scope {
+            TagScope::Home => ("m.origin = 'local' AND m.section_id IS NULL", 0),
+            TagScope::Imported => ("m.origin = 'imported'", 0),
+            TagScope::Section(sid) => ("m.section_id = ?2", sid),
+        };
+        let sql = format!(
             "SELECT t.tag, COUNT(*) FROM memo_tags t
              JOIN memos m ON m.id = t.memo_id
-             WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = ?2
-             GROUP BY t.tag ORDER BY COUNT(*) DESC, t.tag",
-        )?;
-        let rows = stmt
-            .query_map(params![user_id, origin.as_str()], |r| {
-                Ok(TagCount {
-                    tag: r.get(0)?,
-                    count: r.get(1)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+             WHERE m.user_id = ?1 AND m.state = 'normal' AND {cond}
+             GROUP BY t.tag ORDER BY COUNT(*) DESC, t.tag"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let map = |r: &rusqlite::Row<'_>| Ok(TagCount { tag: r.get(0)?, count: r.get(1)? });
+        let rows = match scope {
+            TagScope::Section(_) => stmt
+                .query_map(params![user_id, extra], map)?
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => stmt.query_map(params![user_id], map)?.collect::<Result<Vec<_>, _>>()?,
+        };
         Ok(rows)
     })
     .await
 }
 
 /// Active (non-archived) note counts for the Home and Imported nav items.
+/// Home counts only unsectioned local notes (sectioned ones live under sections).
 pub async fn note_counts(pool: &Pool, user_id: i64) -> Result<NoteCounts, AppError> {
     crate::db::run(pool, move |conn| {
         conn.query_row(
             "SELECT
-               COALESCE(SUM(CASE WHEN origin='local'    AND state='normal' THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN origin='local' AND section_id IS NULL AND state='normal' THEN 1 ELSE 0 END), 0),
                COALESCE(SUM(CASE WHEN origin='imported' AND state='normal' THEN 1 ELSE 0 END), 0)
              FROM memos WHERE user_id = ?1",
             [user_id],

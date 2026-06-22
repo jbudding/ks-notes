@@ -4,6 +4,7 @@ pub mod export_routes;
 pub mod memo_routes;
 pub mod pages;
 pub mod resource_routes;
+pub mod sections_routes;
 pub mod settings_routes;
 pub mod statics;
 
@@ -27,6 +28,9 @@ pub fn router(state: AppState) -> Router {
         .route("/explore", get(pages::explore))
         .route("/archive", get(pages::archive))
         .route("/imported", get(pages::imported))
+        .route("/s/{id}", get(pages::section))
+        .route("/sections", post(sections_routes::create))
+        .route("/sections/{id}/delete", post(sections_routes::delete))
         .route("/m/{uid}", get(pages::memo_page))
         .route("/memos", post(memo_routes::create))
         .route("/memos/{id}", put(memo_routes::update).delete(memo_routes::delete))

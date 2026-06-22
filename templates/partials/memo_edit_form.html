@@ -7,6 +7,17 @@
       </label>
       <button type="button" class="btn-ghost paste-image" title="Paste image from clipboard">📋</button>
       <span class="spacer"></span>
+      <select name="section" title="Section">
+        {% if m.is_imported %}
+        <option value="imported" selected>Imported</option>
+        <option value="home">Home (local)</option>
+        {% else %}
+        <option value="home" {% if let Some(_) = m.section_id %}{% else %}selected{% endif %}>Home</option>
+        {% endif %}
+        {% for s in sections %}
+        <option value="{{ s.id }}"{% if s.active %} selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
       <select name="visibility">
         <option value="private" {% if m.visibility == "private" %}selected{% endif %}>Private</option>
         <option value="protected" {% if m.visibility == "protected" %}selected{% endif %}>Protected</option>

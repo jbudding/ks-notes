@@ -870,3 +870,76 @@ async fn export_filename_includes_tags_and_date() {
     // A YYYY-MM-DD date stamp is present.
     assert!(cd.contains("_20"), "has a date stamp: {cd}");
 }
+
+// Sections: create, compose-into, move out, delete.
+#[tokio::test]
+async fn sections_create_compose_move_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "ivy", "password123").await.unwrap();
+
+    // Create a section -> redirect to /s/{id}.
+    let resp = app
+        .clone()
+        .oneshot(form_req("/sections", Some(&s.cookie), &format!("csrf_token={}&name=Work", s.csrf)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let loc = resp.headers()[header::LOCATION].to_str().unwrap().to_string();
+    let sid: i64 = loc.trim_start_matches("/s/").parse().unwrap();
+
+    // Compose a note inside the section.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/memos")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::from(format!("content=section+note&visibility=private&section_id={sid}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Shows in the section feed, not in Home.
+    assert!(body_text(get(&app, &s, &loc).await).await.contains("section note"));
+    let home = body_text(get(&app, &s, "/").await).await;
+    assert!(!home.contains("section note"), "sectioned note hidden from Home");
+    assert!(home.contains("Work"), "section listed in sidebar");
+
+    // Move it back to Home via the editor (section=home).
+    let feed = body_text(get(&app, &s, &loc).await).await;
+    let id = feed
+        .split("id=\"memo-")
+        .skip(1)
+        .map(|x| x.split('"').next().unwrap_or(""))
+        .find(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()))
+        .expect("numeric memo id")
+        .to_string();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::put(format!("/memos/{id}"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, &s.cookie)
+                .header("X-CSRF-Token", &s.csrf)
+                .body(Body::from("content=section+note&visibility=private&section=home"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(body_text(get(&app, &s, "/").await).await.contains("section note"), "moved back to Home");
+    assert!(!body_text(get(&app, &s, &loc).await).await.contains("section note"), "gone from section");
+
+    // Delete the section; it disappears from the sidebar.
+    let resp = app
+        .clone()
+        .oneshot(form_req(&format!("/sections/{sid}/delete"), Some(&s.cookie), &format!("csrf_token={}", s.csrf)))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert!(!body_text(get(&app, &s, "/").await).await.contains(">Work<"), "section removed");
+}

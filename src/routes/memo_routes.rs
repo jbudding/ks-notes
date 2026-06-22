@@ -8,7 +8,8 @@ use serde::Deserialize;
 use crate::auth::{AuthUser, CsrfGuard};
 use crate::db;
 use crate::error::{AppError, render};
-use crate::models::{Memo, TagCount, Visibility};
+use crate::db::sections::MoveDest;
+use crate::models::{Memo, Section, TagCount, Visibility};
 use crate::state::AppState;
 use crate::views::{MemoView, memo_view};
 
@@ -23,13 +24,15 @@ struct MemoCard {
 struct MemoEditForm {
     m: MemoView,
     upload_limit: String,
+    sections: Vec<Section>,
 }
 
 #[derive(Template)]
 #[template(path = "partials/tag_sidebar.html")]
 struct TagSidebarOob {
     tags: Vec<TagCount>,
-    tags_scope: &'static str,
+    tags_label: String,
+    tags_path: String,
     tag_filter: Option<String>,
     oob: bool,
 }
@@ -38,6 +41,10 @@ struct TagSidebarOob {
 pub struct MemoForm {
     content: String,
     visibility: Option<String>,
+    /// Set by the section-view composer so new notes land in that section.
+    section_id: Option<i64>,
+    /// Set by the editor's Section select to move an existing note.
+    section: Option<String>,
 }
 
 /// Attachments are derived from `{{attach:uid}}` tokens in the content itself,
@@ -75,15 +82,22 @@ async fn card_with_sidebar(
     let card = MemoCard {
         m: card_view(state, memo, viewer).await?,
     };
-    // Refresh the tag list for the feed this note belongs to, so editing an
-    // imported note updates the Imported list (not Home), and vice versa.
-    let (origin, tags_scope) = match memo.origin {
-        crate::models::MemoOrigin::Imported => (crate::models::MemoOrigin::Imported, "imported"),
-        crate::models::MemoOrigin::Local => (crate::models::MemoOrigin::Local, "home"),
+    // Refresh the tag list for the bucket this note belongs to, so the sidebar
+    // (Home / a section / Imported) stays consistent after a create or edit.
+    let (scope, label, path) = match (memo.origin, memo.section_id) {
+        (crate::models::MemoOrigin::Imported, _) => {
+            (db::memos::TagScope::Imported, "Imported".to_string(), "/imported".to_string())
+        }
+        (_, Some(sid)) => {
+            let name = db::sections::name(&state.pool, viewer.id, sid).await.unwrap_or_default();
+            (db::memos::TagScope::Section(sid), name, format!("/s/{sid}"))
+        }
+        _ => (db::memos::TagScope::Home, "Home".to_string(), "/".to_string()),
     };
     let sidebar = TagSidebarOob {
-        tags: db::memos::tag_counts(&state.pool, viewer.id, origin).await?,
-        tags_scope,
+        tags: db::memos::tag_counts(&state.pool, viewer.id, scope).await?,
+        tags_label: label,
+        tags_path: path,
         tag_filter: None,
         oob: true,
     };
@@ -95,8 +109,10 @@ pub async fn create(
     CsrfGuard(session): CsrfGuard,
     Form(form): Form<MemoForm>,
 ) -> Result<Response, AppError> {
+    let section_id = form.section_id;
     let (content, visibility) = parse_form(&form)?;
-    let memo = db::memos::create(&state.pool, session.user.id, content, visibility).await?;
+    let memo =
+        db::memos::create(&state.pool, session.user.id, content, visibility, section_id).await?;
     card_with_sidebar(&state, &memo, &session.user).await
 }
 
@@ -106,8 +122,15 @@ pub async fn update(
     CsrfGuard(session): CsrfGuard,
     Form(form): Form<MemoForm>,
 ) -> Result<Response, AppError> {
+    let move_to = form.section.clone();
     let (content, visibility) = parse_form(&form)?;
-    let memo = db::memos::update(&state.pool, id, session.user.id, content, visibility).await?;
+    db::memos::update(&state.pool, id, session.user.id, content, visibility).await?;
+    if let Some(dest) = move_to {
+        db::sections::set_note_section(&state.pool, session.user.id, id, MoveDest::parse(&dest))
+            .await?;
+    }
+    // Re-fetch so the card + sidebar reflect any section/origin change.
+    let memo = db::memos::get(&state.pool, id).await?;
     card_with_sidebar(&state, &memo, &session.user).await
 }
 
@@ -126,9 +149,14 @@ pub async fn edit_form(
     AuthUser(session): AuthUser,
 ) -> Result<Response, AppError> {
     let memo = own_memo(&state, id, session.user.id).await?;
+    let mut sections = db::sections::list(&state.pool, session.user.id).await?;
+    for s in sections.iter_mut() {
+        s.active = memo.section_id == Some(s.id);
+    }
     render(&MemoEditForm {
         m: card_view(&state, &memo, &session.user).await?,
         upload_limit: crate::views::upload_limit_label(state.config.max_upload_mb),
+        sections,
     })
 }
 

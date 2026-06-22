@@ -11,6 +11,27 @@
     <a href="/admin" {% if nav_active == "admin" %}class="active"{% endif %}>Admin</a>
     {% endif %}
   </nav>
+
+  <div class="nav-sections">
+    <h3>Sections</h3>
+    {% for s in sections %}
+    <div class="section-row{% if s.active %} active{% endif %}">
+      <a href="/s/{{ s.id }}">{{ s.name }}</a>
+      <span class="nav-count">{{ s.count }}</span>
+      <form method="post" action="/sections/{{ s.id }}/delete"
+            onsubmit="return confirm('Delete this section? Its notes move back to Home.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn-ghost section-del" title="Delete section">×</button>
+      </form>
+    </div>
+    {% endfor %}
+    <form class="add-section" method="post" action="/sections">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input name="name" placeholder="New section" maxlength="60" required>
+      <button type="submit" class="btn-ghost" title="Add section">+</button>
+    </form>
+  </div>
+
   {% let oob = false %}
   {% include "partials/tag_sidebar.html" %}
   <div class="user-box">
