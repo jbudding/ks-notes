@@ -60,7 +60,7 @@ pub async fn name(pool: &Pool, user_id: i64, id: i64) -> Result<String, AppError
 }
 
 pub async fn create(pool: &Pool, user_id: i64, name: String) -> Result<i64, AppError> {
-    let name = name.trim().chars().take(60).collect::<String>();
+    let name = name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::BadRequest("Section name can't be empty".into()));
     }

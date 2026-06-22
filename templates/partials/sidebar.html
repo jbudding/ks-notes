@@ -27,7 +27,7 @@
     {% endfor %}
     <form class="add-section" method="post" action="/sections">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input name="name" placeholder="New section" maxlength="60" required>
+      <input name="name" placeholder="New section" required>
       <button type="submit" class="btn-ghost" title="Add section">+</button>
     </form>
   </div>
