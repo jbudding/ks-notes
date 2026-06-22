@@ -240,9 +240,15 @@ document.body.addEventListener("htmx:afterRequest", function (e) {
 // line below the cursor, so every note is self-tagged but typed above it.
 function seedSelfTag(ta) {
   if (!ta || ta.value.trim() !== "") return;
-  var tag = ta.getAttribute("data-self-tag");
-  if (!tag) return;
-  ta.value = "\n\n#" + tag;
+  var tags = [];
+  var self = ta.getAttribute("data-self-tag");
+  if (self) tags.push(self);
+  // When the feed is filtered by a tag, seed that tag too so notes written
+  // here stay in the same bucket. Dedupe case-insensitively against the self-tag.
+  var filter = ta.getAttribute("data-filter-tag");
+  if (filter && filter.toLowerCase() !== (self || "").toLowerCase()) tags.push(filter);
+  if (!tags.length) return;
+  ta.value = "\n\n" + tags.map(function (t) { return "#" + t; }).join(" ");
   try {
     ta.setSelectionRange(0, 0);
   } catch (_) {}

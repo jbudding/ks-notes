@@ -37,7 +37,7 @@
     {% if show_composer %}
     <form class="composer" hx-post="/memos" hx-target="#memo-feed" hx-swap="afterbegin"
           hx-on::after-request="if(event.detail.successful && event.detail.elt === this) { this.reset(); this.querySelector('.attach-chips').innerHTML=''; }">
-      <textarea name="content" placeholder="Any thoughts…" data-self-tag="{{ username }}" required></textarea>
+      <textarea name="content" placeholder="Any thoughts…" data-self-tag="{{ username }}"{% if let Some(t) = tag_filter %} data-filter-tag="{{ t }}"{% endif %} required></textarea>
       <div class="composer-bar">
         <label class="btn-ghost" title="Attach files ({{ upload_limit }})">
           📎<input type="file" name="file" multiple hidden class="file-input">
