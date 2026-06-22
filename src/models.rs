@@ -132,3 +132,10 @@ pub struct TagCount {
     pub tag: String,
     pub count: i64,
 }
+
+/// Active-note counts shown next to the Home and Imported nav items.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoteCounts {
+    pub home: i64,
+    pub imported: i64,
+}

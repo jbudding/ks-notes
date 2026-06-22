@@ -5,7 +5,7 @@ use rusqlite::{Connection, params, params_from_iter};
 use crate::error::AppError;
 use data_encoding::BASE64;
 
-use crate::models::{ExportAttachment, ExportNote, Memo, MemoState, TagCount, Visibility};
+use crate::models::{ExportAttachment, ExportNote, Memo, MemoState, NoteCounts, TagCount, Visibility};
 
 const MEMO_COLS: &str = "m.id, m.uid, m.user_id, u.username, m.content, m.visibility,
                          m.pinned, m.state, m.created_at, m.updated_at, m.uuid, m.origin";
@@ -366,6 +366,22 @@ pub async fn tag_counts(pool: &Pool, user_id: i64) -> Result<Vec<TagCount>, AppE
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    })
+    .await
+}
+
+/// Active (non-archived) note counts for the Home and Imported nav items.
+pub async fn note_counts(pool: &Pool, user_id: i64) -> Result<NoteCounts, AppError> {
+    crate::db::run(pool, move |conn| {
+        conn.query_row(
+            "SELECT
+               COALESCE(SUM(CASE WHEN origin='local'    AND state='normal' THEN 1 ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN origin='imported' AND state='normal' THEN 1 ELSE 0 END), 0)
+             FROM memos WHERE user_id = ?1",
+            [user_id],
+            |r| Ok(NoteCounts { home: r.get(0)?, imported: r.get(1)? }),
+        )
+        .map_err(AppError::from)
     })
     .await
 }

@@ -24,6 +24,7 @@ struct IndexPage {
     is_admin: bool,
     csrf_token: String,
     nav_active: &'static str,
+    counts: crate::models::NoteCounts,
     tags: Vec<TagCount>,
     tag_filter: Option<String>,
     q: Option<String>,
@@ -291,6 +292,7 @@ async fn feed_response(
         })
     } else {
         let tags = db::memos::tag_counts(&state.pool, session.user.id).await?;
+        let nav_counts = db::memos::note_counts(&state.pool, session.user.id).await?;
         // Heatmap over roughly the last year of the owner's own notes.
         let activity = if cfg.activity {
             let since = (OffsetDateTime::now_utc() - Duration::days(400)).unix_timestamp();
@@ -308,6 +310,7 @@ async fn feed_response(
             is_admin: session.user.is_admin(),
             csrf_token: session.csrf_token.clone(),
             nav_active: cfg.nav,
+            counts: nav_counts,
             tags,
             tag_filter: tag,
             q,
