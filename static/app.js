@@ -250,6 +250,20 @@ function uploadOne(ta, file, nonce) {
   });
 }
 
+// Upload a list of files into a form's note, inserting an attachment token per
+// file. Sequential so the inline tokens land in order.
+function uploadFiles(form, ta, files) {
+  if (!files.length) return;
+  setUploading(form, files.length);
+  files.reduce(function (chain, file, idx) {
+    return chain.then(function () {
+      return uploadOne(ta, file, Date.now() + "-" + idx).then(function () {
+        setUploading(form, -1);
+      });
+    });
+  }, Promise.resolve());
+}
+
 document.addEventListener("change", function (e) {
   var input = e.target.closest(".file-input");
   if (!input || !input.files || !input.files.length) return;
@@ -260,16 +274,63 @@ document.addEventListener("change", function (e) {
 
   var files = Array.prototype.slice.call(input.files);
   input.value = ""; // allow re-selecting the same file later
+  uploadFiles(form, ta, files);
+});
 
-  setUploading(form, files.length);
-  // Upload sequentially so the inline tokens land in selection order.
-  files.reduce(function (chain, file, idx) {
-    return chain.then(function () {
-      return uploadOne(ta, file, Date.now() + "-" + idx).then(function () {
-        setUploading(form, -1);
+// Wrap a clipboard image blob as a named File so it uploads like a normal attach.
+function imageFile(blob, type) {
+  var ext = (type || "image/png").split("/")[1] || "png";
+  return new File([blob], "pasted-" + Date.now() + "." + ext, { type: type || blob.type });
+}
+
+// Paste-image icon: read an image off the clipboard and insert it at the cursor.
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest(".paste-image");
+  if (!btn) return;
+  var form = btn.closest("form");
+  var ta = form && form.querySelector("textarea[name=content]");
+  if (!ta) return;
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    alert("Pasting from the clipboard needs a secure (https) page. You can still press Ctrl+V in the note.");
+    return;
+  }
+  navigator.clipboard
+    .read()
+    .then(function (items) {
+      var jobs = [];
+      items.forEach(function (item) {
+        item.types.forEach(function (type) {
+          if (type.indexOf("image/") === 0) {
+            jobs.push(item.getType(type).then(function (b) { return imageFile(b, type); }));
+          }
+        });
       });
+      if (!jobs.length) {
+        alert("No image found on the clipboard.");
+        return;
+      }
+      Promise.all(jobs).then(function (files) { uploadFiles(form, ta, files); });
+    })
+    .catch(function (err) {
+      alert("Couldn't read the clipboard: " + (err && err.message ? err.message : err));
     });
-  }, Promise.resolve());
+});
+
+// Ctrl+V of an image into the note also attaches it inline (works without https).
+document.addEventListener("paste", function (e) {
+  var ta = e.target;
+  if (!ta || ta.tagName !== "TEXTAREA" || ta.name !== "content" || !e.clipboardData) return;
+  var files = [];
+  Array.prototype.forEach.call(e.clipboardData.items || [], function (it) {
+    if (it.kind === "file" && it.type.indexOf("image/") === 0) {
+      var blob = it.getAsFile();
+      if (blob) files.push(imageFile(blob, it.type));
+    }
+  });
+  if (!files.length) return; // let normal text paste through
+  e.preventDefault();
+  var form = ta.closest("form");
+  if (form) uploadFiles(form, ta, files);
 });
 
 // After any swap, reconcile full-page state. We scan the DOM rather than trust
