@@ -301,6 +301,12 @@ button:hover, .btn:hover { border-color: var(--text-muted); }
   background: none;
   color: var(--text-muted);
   padding: 4px 8px;
+  /* Normalize so <label> and <button> ghost controls line up identically. */
+  font: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
 }
 .btn-ghost:hover { color: var(--text); }
 .btn-danger { color: var(--danger); }
