@@ -26,6 +26,7 @@ struct IndexPage {
     nav_active: &'static str,
     counts: crate::models::NoteCounts,
     tags: Vec<TagCount>,
+    tags_scope: &'static str,
     tag_filter: Option<String>,
     q: Option<String>,
     show_composer: bool,
@@ -291,7 +292,13 @@ async fn feed_response(
             feed_path: cfg.path,
         })
     } else {
-        let tags = db::memos::tag_counts(&state.pool, session.user.id).await?;
+        // The Imported feed shows imported-note tags; every other feed the local set.
+        let (tags_origin, tags_scope) = if cfg.nav == "imported" {
+            (crate::models::MemoOrigin::Imported, "imported")
+        } else {
+            (crate::models::MemoOrigin::Local, "home")
+        };
+        let tags = db::memos::tag_counts(&state.pool, session.user.id, tags_origin).await?;
         let nav_counts = db::memos::note_counts(&state.pool, session.user.id).await?;
         // Heatmap over roughly the last year of the owner's own notes.
         let activity = if cfg.activity {
@@ -312,6 +319,7 @@ async fn feed_response(
             nav_active: cfg.nav,
             counts: nav_counts,
             tags,
+            tags_scope,
             tag_filter: tag,
             q,
             show_composer: cfg.composer,

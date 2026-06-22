@@ -792,3 +792,28 @@ async fn import_overwrite_option_forces_replace() {
     let imported = body_text(get(&app, &s, "/imported").await).await;
     assert!(imported.contains("changed") && !imported.contains("first"), "content replaced: {imported}");
 }
+
+// Home and Imported show their own tag lists with the right header and link base.
+#[tokio::test]
+async fn tag_sidebar_is_per_feed() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "frank", "password123").await.unwrap();
+
+    // A local note tagged #alpha, and an imported note tagged #beta.
+    create_memo(&app, &s, "local note #alpha", "private").await;
+    let imp = r#"{"version":3,"notes":[{"uuid":"t-1","content":"imported #beta","visibility":"private","created_at":1,"updated_at":1}]}"#;
+    app.clone().oneshot(import_req(&s, imp)).await.unwrap();
+
+    // Home: "Home TAGS", #alpha (not #beta), links to /?tag=
+    let home = body_text(get(&app, &s, "/").await).await;
+    assert!(home.contains("Home TAGS"), "home header: {home}");
+    assert!(home.contains("#alpha") && !home.contains("#beta"), "home shows local tags only");
+    assert!(home.contains("href=\"/?tag=alpha\""), "home tag links to home feed");
+
+    // Imported: "Imported TAGS", #beta (not #alpha), links to /imported?tag=
+    let imported = body_text(get(&app, &s, "/imported").await).await;
+    assert!(imported.contains("Imported TAGS"), "imported header: {imported}");
+    assert!(imported.contains("#beta") && !imported.contains("#alpha"), "imported shows imported tags only");
+    assert!(imported.contains("href=\"/imported?tag=beta\""), "imported tag links to imported feed");
+}

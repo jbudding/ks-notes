@@ -29,6 +29,7 @@ struct MemoEditForm {
 #[template(path = "partials/tag_sidebar.html")]
 struct TagSidebarOob {
     tags: Vec<TagCount>,
+    tags_scope: &'static str,
     tag_filter: Option<String>,
     oob: bool,
 }
@@ -74,8 +75,15 @@ async fn card_with_sidebar(
     let card = MemoCard {
         m: card_view(state, memo, viewer).await?,
     };
+    // Refresh the tag list for the feed this note belongs to, so editing an
+    // imported note updates the Imported list (not Home), and vice versa.
+    let (origin, tags_scope) = match memo.origin {
+        crate::models::MemoOrigin::Imported => (crate::models::MemoOrigin::Imported, "imported"),
+        crate::models::MemoOrigin::Local => (crate::models::MemoOrigin::Local, "home"),
+    };
     let sidebar = TagSidebarOob {
-        tags: db::memos::tag_counts(&state.pool, viewer.id).await?,
+        tags: db::memos::tag_counts(&state.pool, viewer.id, origin).await?,
+        tags_scope,
         tag_filter: None,
         oob: true,
     };

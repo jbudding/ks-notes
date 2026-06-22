@@ -226,7 +226,7 @@ pub async fn tags(
     State(state): State<AppState>,
     ApiUser(user): ApiUser,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let tags = db::memos::tag_counts(&state.pool, user.id).await?;
+    let tags = db::memos::tag_counts(&state.pool, user.id, crate::models::MemoOrigin::Local).await?;
     let items: Vec<_> = tags
         .into_iter()
         .map(|t| json!({"tag": t.tag, "count": t.count}))

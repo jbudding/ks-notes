@@ -1,9 +1,9 @@
 <div id="tag-sidebar"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
   {% if !tags.is_empty() %}
-  <h3>Tags</h3>
+  <h3>{% if tags_scope == "imported" %}Imported{% else %}Home{% endif %} TAGS</h3>
   <div class="tag-list">
     {% for t in tags %}
-    <a href="/?tag={{ t.tag|urlencode }}"
+    <a href="{% if tags_scope == "imported" %}/imported{% else %}/{% endif %}?tag={{ t.tag|urlencode }}"
        {% if tag_filter.as_deref() == Some(t.tag.as_str()) %}class="active"{% endif %}>
       <span>#{{ t.tag }}</span><span class="count">{{ t.count }}</span>
     </a>

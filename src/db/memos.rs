@@ -348,17 +348,22 @@ pub async fn list(pool: &Pool, query: MemoQuery) -> Result<MemoPage, AppError> {
     .await
 }
 
-/// Tag counts for the sidebar — the viewer's own active memos.
-pub async fn tag_counts(pool: &Pool, user_id: i64) -> Result<Vec<TagCount>, AppError> {
+/// Tag counts for the sidebar — the viewer's active memos of the given origin
+/// (local = Home, imported = Imported).
+pub async fn tag_counts(
+    pool: &Pool,
+    user_id: i64,
+    origin: crate::models::MemoOrigin,
+) -> Result<Vec<TagCount>, AppError> {
     crate::db::run(pool, move |conn| {
         let mut stmt = conn.prepare(
             "SELECT t.tag, COUNT(*) FROM memo_tags t
              JOIN memos m ON m.id = t.memo_id
-             WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = 'local'
+             WHERE m.user_id = ?1 AND m.state = 'normal' AND m.origin = ?2
              GROUP BY t.tag ORDER BY COUNT(*) DESC, t.tag",
         )?;
         let rows = stmt
-            .query_map([user_id], |r| {
+            .query_map(params![user_id, origin.as_str()], |r| {
                 Ok(TagCount {
                     tag: r.get(0)?,
                     count: r.get(1)?,
