@@ -1,14 +1,14 @@
 use askama::Template;
+use axum::Form;
+use axum::body::{Body, Bytes};
 use axum::extract::{Multipart, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
-use axum::{Form, Json};
-use serde::Deserialize;
 
-use crate::auth::{self, AuthUser, CsrfGuard, SessionUser};
+use crate::auth::{self, AuthUser, SessionUser};
 use crate::db;
 use crate::error::{AppError, render};
-use crate::models::{ExportFile, ExportNote, TagCount};
+use crate::models::{ExportFile, TagCount};
 use crate::state::AppState;
 
 #[derive(Template)]
@@ -93,26 +93,77 @@ pub async fn download(
         .into_response())
 }
 
-#[derive(Deserialize)]
-pub struct ImportOneBody {
-    overwrite: bool,
-    note: ExportNote,
-}
-
-/// Segmented import: process a single note and report its status, so the client
-/// can show "n of X" progress with a per-note added/merged/skipped result.
-pub async fn import_one(
+/// Segmented import: the browser streams the file up (so it never loads the
+/// whole thing into memory), and we stream back one NDJSON line per note —
+/// `{i, total, uuid, status}` — so the client shows live "n of X" progress with
+/// each note's added/merged/skipped result. Notes are processed one at a time.
+pub async fn import_stream(
     State(state): State<AppState>,
-    CsrfGuard(session): CsrfGuard,
-    Json(body): Json<ImportOneBody>,
+    AuthUser(session): AuthUser,
+    mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let uuid = body.note.uuid.clone();
-    let status = db::memos::import_note(&state.pool, session.user.id, body.note, body.overwrite).await?;
-    Ok(Json(serde_json::json!({ "uuid": uuid, "status": status.as_str() })).into_response())
+    let mut csrf = String::new();
+    let mut data: Vec<u8> = Vec::new();
+    let mut overwrite = false;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("import: {e}")))?
+    {
+        match field.name() {
+            Some("csrf_token") => {
+                csrf = field.text().await.map_err(|e| AppError::BadRequest(format!("import: {e}")))?;
+            }
+            Some("overwrite") => {
+                overwrite = field.text().await.map_err(|e| AppError::BadRequest(format!("import: {e}")))? == "true";
+            }
+            Some("file") => {
+                data = field.bytes().await.map_err(|e| AppError::BadRequest(format!("import: {e}")))?.to_vec();
+            }
+            _ => {}
+        }
+    }
+    auth::require_csrf_field(&session, &csrf)?;
+
+    let file: ExportFile = serde_json::from_slice(&data)
+        .map_err(|e| AppError::BadRequest(format!("Couldn't read that file as a ks-notes export: {e}")))?;
+    let total = file.notes.len();
+    let pool = state.pool.clone();
+    let uid = session.user.id;
+
+    let stream = futures_util::stream::unfold(
+        (pool, file.notes.into_iter(), 0usize),
+        move |(pool, mut iter, i)| async move {
+            let note = iter.next()?;
+            let uuid = note.uuid.clone();
+            let status = match db::memos::import_note(&pool, uid, note, overwrite).await {
+                Ok(s) => s.as_str(),
+                Err(_) => "error",
+            };
+            let line = format!(
+                "{{\"i\":{},\"total\":{},\"uuid\":{},\"status\":\"{}\"}}\n",
+                i + 1,
+                total,
+                serde_json::to_string(&uuid).unwrap_or_else(|_| "\"\"".to_string()),
+                status,
+            );
+            Some((
+                Ok::<_, std::io::Error>(Bytes::from(line)),
+                (pool, iter, i + 1),
+            ))
+        },
+    );
+
+    Ok((
+        [(CONTENT_TYPE, "application/x-ndjson")],
+        Body::from_stream(stream),
+    )
+        .into_response())
 }
 
 /// Import a previously exported JSON file. Multipart upload, so the CSRF token
-/// is a `csrf_token` part alongside the `file` part.
+/// is a `csrf_token` part alongside the `file` part. No-JS fallback for the
+/// segmented importer; returns the page with a summary.
 pub async fn import(
     State(state): State<AppState>,
     AuthUser(session): AuthUser,

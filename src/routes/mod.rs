@@ -38,7 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/r/{uid}", get(resource_routes::serve))
         .route("/export", get(export_routes::page).post(export_routes::download))
         .route("/import", post(export_routes::import))
-        .route("/import/note", post(export_routes::import_one))
+        .route("/import/stream", post(export_routes::import_stream))
         .route("/login", get(auth_routes::login_page).post(auth_routes::login_submit))
         .route(
             "/register",

@@ -74,83 +74,94 @@ document.addEventListener("keydown", function (e) {
 });
 
 // --- Segmented import --------------------------------------------------------
-// Parse the export file in the browser and POST one note at a time to
-// /import/note, showing "n of X" progress and each note's uuid + status
-// (added / merged / skipped). Falls back to the plain multipart /import when
-// the File API is unavailable.
+// The browser streams the file up to /import/stream (so a large export is never
+// loaded into memory here), and the server streams back one NDJSON line per note
+// — {i, total, uuid, status} — which we render as live "n of X" progress plus a
+// per-note added/merged/skipped log. Falls back to the plain multipart /import
+// (full page reload) when streaming responses aren't available.
 function importSegmented(form, file) {
-  var csrfEl = form.querySelector('input[name=csrf_token]');
-  var csrf = csrfEl ? csrfEl.value : "";
   var owEl = form.querySelector('input[name=overwrite]');
   var overwrite = !!(owEl && owEl.checked);
-  var progress = document.getElementById("import-progress");
+  var csrfEl = form.querySelector('input[name=csrf_token]');
   var fill = document.getElementById("import-fill");
   var status = document.getElementById("import-status");
   var log = document.getElementById("import-log");
   var btn = form.querySelector("button[type=submit]");
 
-  var reader = new FileReader();
-  reader.onload = function () {
-    var notes;
-    try {
-      notes = (JSON.parse(reader.result) || {}).notes || [];
-    } catch (_) {
-      alert("Couldn't read that file as a ks-notes export.");
-      return;
-    }
-    if (!notes.length) {
-      alert("No notes found in that file.");
-      return;
-    }
+  document.getElementById("import-progress").hidden = false;
+  log.innerHTML = "";
+  fill.style.width = "0%";
+  status.textContent = "Uploading…";
+  if (btn) btn.disabled = true;
 
-    progress.hidden = false;
-    log.innerHTML = "";
-    fill.style.width = "0%";
-    if (btn) btn.disabled = true;
-    var total = notes.length;
-    var counts = { added: 0, merged: 0, skipped: 0, error: 0 };
-
-    function finish() {
-      status.textContent =
-        "Done — " + counts.added + " added, " + counts.merged + " merged, " + counts.skipped + " skipped" +
-        (counts.error ? ", " + counts.error + " failed" : "") + ".";
-      if (btn) btn.disabled = false;
+  var counts = { added: 0, merged: 0, skipped: 0, error: 0 };
+  function finish() {
+    status.textContent =
+      "Done — " + counts.added + " added, " + counts.merged + " merged, " + counts.skipped + " skipped" +
+      (counts.error ? ", " + counts.error + " failed" : "") + ".";
+    if (btn) btn.disabled = false;
+  }
+  function handleLine(line) {
+    line = line.trim();
+    if (!line) return;
+    var o;
+    try { o = JSON.parse(line); } catch (_) { return; }
+    if (counts[o.status] !== undefined) counts[o.status]++;
+    if (o.total) {
+      fill.style.width = Math.round((o.i / o.total) * 100) + "%";
+      status.textContent = o.i + " of " + o.total + " notes processed";
     }
+    var li = document.createElement("li");
+    li.className = "import-" + o.status;
+    li.innerHTML = '<span class="import-uuid"></span><span class="import-stat"></span>';
+    li.querySelector(".import-uuid").textContent = o.uuid;
+    li.querySelector(".import-stat").textContent = o.status;
+    log.appendChild(li);
+  }
 
-    function step(i) {
-      if (i >= total) return finish();
-      status.textContent = "Processing " + (i + 1) + " of " + total + " notes…";
-      fetch("/import/note", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify({ overwrite: overwrite, note: notes[i] }),
-      })
-        .then(function (r) {
-          return r.ok ? r.json() : { uuid: notes[i].uuid || "?", status: "error" };
-        })
-        .catch(function () {
-          return { uuid: notes[i].uuid || "?", status: "error" };
-        })
-        .then(function (res) {
-          if (counts[res.status] !== undefined) counts[res.status]++;
-          fill.style.width = Math.round(((i + 1) / total) * 100) + "%";
-          var li = document.createElement("li");
-          li.className = "import-" + res.status;
-          li.innerHTML = '<span class="import-uuid"></span><span class="import-stat"></span>';
-          li.querySelector(".import-uuid").textContent = res.uuid;
-          li.querySelector(".import-stat").textContent = res.status;
-          log.appendChild(li);
-          step(i + 1);
+  var fd = new FormData();
+  fd.append("csrf_token", csrfEl ? csrfEl.value : "");
+  if (overwrite) fd.append("overwrite", "true");
+  fd.append("file", file); // streamed from disk, not buffered into a JS string
+
+  fetch("/import/stream", { method: "POST", body: fd })
+    .then(function (resp) {
+      if (!resp.ok || !resp.body || !resp.body.getReader) {
+        return resp.text().then(function () {
+          alert("Import failed (" + resp.status + ").");
+          if (btn) btn.disabled = false;
         });
-    }
-    step(0);
-  };
-  reader.readAsText(file);
+      }
+      var reader = resp.body.getReader();
+      var dec = new TextDecoder();
+      var buf = "";
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) {
+            handleLine(buf);
+            finish();
+            return;
+          }
+          buf += dec.decode(res.value, { stream: true });
+          var parts = buf.split("\n");
+          buf = parts.pop();
+          parts.forEach(handleLine);
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function () {
+      alert("Import failed.");
+      if (btn) btn.disabled = false;
+    });
 }
 
 document.addEventListener("submit", function (e) {
   var form = e.target;
-  if (!form || form.id !== "import-form" || !window.FileReader) return;
+  // Need fetch + streaming response support; otherwise let the form post to
+  // /import for the plain bulk fallback.
+  if (!form || form.id !== "import-form" || !window.fetch || !window.ReadableStream) return;
   var input = form.querySelector('input[type=file]');
   var file = input && input.files && input.files[0];
   if (!file) return; // let the required attribute handle the empty case

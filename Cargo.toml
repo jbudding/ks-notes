@@ -1,6 +1,6 @@
 [package]
 name = "ks-notes"
-version = "0.1.23"
+version = "0.1.24"
 edition = "2024"
 
 [dependencies]
@@ -11,6 +11,7 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 comrak = { version = "0.52.0", default-features = false }
 data-encoding = "2.11.0"
 deadpool-sqlite = "0.13.0"
+futures-util = "0.3.31"
 rand = "0.10.1"
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }

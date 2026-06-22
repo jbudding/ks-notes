@@ -598,10 +598,10 @@ fn export_req(s: &Session, tags: &[&str]) -> Request<Body> {
 }
 
 fn import_req(s: &Session, json: &str) -> Request<Body> {
-    import_req_opts(s, json, false)
+    import_req_opts(s, json, false, "/import")
 }
 
-fn import_req_opts(s: &Session, json: &str, overwrite: bool) -> Request<Body> {
+fn import_req_opts(s: &Session, json: &str, overwrite: bool, path: &str) -> Request<Body> {
     let boundary = "IMPORTBOUNDARY";
     let mut body = Vec::new();
     body.extend_from_slice(
@@ -620,7 +620,7 @@ fn import_req_opts(s: &Session, json: &str, overwrite: bool) -> Request<Body> {
     );
     body.extend_from_slice(json.as_bytes());
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    Request::post("/import")
+    Request::post(path.to_string())
         .header(header::COOKIE, &s.cookie)
         .header(
             header::CONTENT_TYPE,
@@ -787,7 +787,7 @@ async fn import_overwrite_option_forces_replace() {
     assert!(body_text(get(&app, &s, "/imported").await).await.contains("first"));
 
     // With the option on -> overwritten despite not being newer.
-    let page = body_text(app.clone().oneshot(import_req_opts(&s, older, true)).await.unwrap()).await;
+    let page = body_text(app.clone().oneshot(import_req_opts(&s, older, true, "/import")).await.unwrap()).await;
     assert!(page.contains("updated 1"), "overwrite option should replace: {page}");
     let imported = body_text(get(&app, &s, "/imported").await).await;
     assert!(imported.contains("changed") && !imported.contains("first"), "content replaced: {imported}");
@@ -818,34 +818,32 @@ async fn tag_sidebar_is_per_feed() {
     assert!(imported.contains("href=\"/imported?tag=beta\""), "imported tag links to imported feed");
 }
 
-// The segmented import endpoint reports per-note status by uuid.
+// The segmented import streams one NDJSON status line per note (i/total/uuid/status).
 #[tokio::test]
-async fn import_one_reports_status() {
+async fn import_stream_reports_status() {
     let dir = tempfile::tempdir().unwrap();
     let app = test_app(&dir);
     let s = register(&app, "gwen", "password123").await.unwrap();
 
-    fn one_req(s: &Session, overwrite: bool, uuid: &str, updated: i64) -> Request<Body> {
-        let body = format!(
-            "{{\"overwrite\":{overwrite},\"note\":{{\"uuid\":\"{uuid}\",\"content\":\"c #x\",\"visibility\":\"private\",\"created_at\":1,\"updated_at\":{updated}}}}}"
-        );
-        Request::post("/import/note")
-            .header(header::COOKIE, &s.cookie)
-            .header("X-CSRF-Token", &s.csrf)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(body))
-            .unwrap()
-    }
+    // A two-note file, both new -> two "added" lines with i=1/total=2 and i=2/total=2.
+    let two = r#"{"version":3,"notes":[
+        {"uuid":"a1","content":"one #x","visibility":"private","created_at":1,"updated_at":1},
+        {"uuid":"a2","content":"two #x","visibility":"private","created_at":1,"updated_at":1}]}"#;
+    let body = body_text(
+        app.clone()
+            .oneshot(import_req_opts(&s, two, false, "/import/stream"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(body.contains("\"total\":2"), "reports total: {body}");
+    assert!(body.contains("\"uuid\":\"a1\",\"status\":\"added\""), "a1 added: {body}");
+    assert!(body.contains("\"uuid\":\"a2\",\"status\":\"added\""), "a2 added: {body}");
 
-    // First time: added.
-    let r = body_text(app.clone().oneshot(one_req(&s, false, "u1", 1000)).await.unwrap()).await;
-    assert!(r.contains("\"status\":\"added\"") && r.contains("\"uuid\":\"u1\""), "{r}");
-
-    // Same/older, no overwrite: skipped.
-    let r = body_text(app.clone().oneshot(one_req(&s, false, "u1", 1000)).await.unwrap()).await;
-    assert!(r.contains("\"status\":\"skipped\""), "{r}");
-
-    // With overwrite: merged.
-    let r = body_text(app.clone().oneshot(one_req(&s, true, "u1", 1000)).await.unwrap()).await;
-    assert!(r.contains("\"status\":\"merged\""), "{r}");
+    // Re-import a1 unchanged -> skipped; with overwrite -> merged.
+    let one = r#"{"version":3,"notes":[{"uuid":"a1","content":"one #x","visibility":"private","created_at":1,"updated_at":1}]}"#;
+    let body = body_text(app.clone().oneshot(import_req_opts(&s, one, false, "/import/stream")).await.unwrap()).await;
+    assert!(body.contains("\"status\":\"skipped\""), "skipped: {body}");
+    let body = body_text(app.clone().oneshot(import_req_opts(&s, one, true, "/import/stream")).await.unwrap()).await;
+    assert!(body.contains("\"status\":\"merged\""), "merged: {body}");
 }
