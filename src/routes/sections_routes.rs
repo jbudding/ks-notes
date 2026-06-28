@@ -1,5 +1,6 @@
 use axum::Form;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
@@ -39,4 +40,20 @@ pub async fn delete(
     db::sections::delete(&state.pool, session.user.id, id).await?;
     // Its notes fall back to Home; go there.
     Ok(Redirect::to("/home").into_response())
+}
+
+pub async fn pin(
+    State(state): State<AppState>,
+    AuthUser(session): AuthUser,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> Result<Response, AppError> {
+    auth::require_csrf_field(&session, &form.csrf_token)?;
+    db::sections::toggle_pin(&state.pool, session.user.id, id).await?;
+    let back = headers
+        .get("referer")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("/");
+    Ok(Redirect::to(back).into_response())
 }

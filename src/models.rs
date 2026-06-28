@@ -90,6 +90,7 @@ pub struct Section {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    pub pinned: bool,
     /// Marks the current feed's section (sidebar highlight) or the editing
     /// note's section (editor select) — set by the caller, not the query.
     pub active: bool,

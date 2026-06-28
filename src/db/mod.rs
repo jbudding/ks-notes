@@ -141,6 +141,10 @@ CREATE TABLE sections (
 ALTER TABLE memos ADD COLUMN section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL;
 CREATE INDEX idx_memos_section ON memos(section_id, state, created_at DESC);
 "#,
+    // 005 — pinnable sections. Pinned sections float above Global in the sidebar.
+    r#"
+ALTER TABLE sections ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+"#,
 ];
 
 /// Open the database directly (pre-pool), enable WAL, and apply pending migrations.

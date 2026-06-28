@@ -32,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .route("/s/{id}", get(pages::section))
         .route("/sections", post(sections_routes::create))
         .route("/sections/{id}/delete", post(sections_routes::delete))
+        .route("/sections/{id}/pin", post(sections_routes::pin))
         .route("/m/{uid}", get(pages::memo_page))
         .route("/memos", post(memo_routes::create))
         .route("/memos/{id}", put(memo_routes::update).delete(memo_routes::delete))

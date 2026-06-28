@@ -29,19 +29,37 @@ impl MoveDest {
 pub async fn list(pool: &Pool, user_id: i64) -> Result<Vec<Section>, AppError> {
     crate::db::run(pool, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, COUNT(m.id)
+            "SELECT s.id, s.name, COUNT(m.id), s.pinned
              FROM sections s
              LEFT JOIN memos m ON m.section_id = s.id AND m.state = 'normal'
              WHERE s.user_id = ?1
-             GROUP BY s.id, s.name
+             GROUP BY s.id, s.name, s.pinned
              ORDER BY s.position, s.name COLLATE NOCASE",
         )?;
         let rows = stmt
             .query_map([user_id], |r| {
-                Ok(Section { id: r.get(0)?, name: r.get(1)?, count: r.get(2)?, active: false })
+                Ok(Section {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    count: r.get(2)?,
+                    pinned: r.get::<_, i64>(3)? != 0,
+                    active: false,
+                })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    })
+    .await
+}
+
+/// Toggle the pinned state of a section.
+pub async fn toggle_pin(pool: &Pool, user_id: i64, id: i64) -> Result<(), AppError> {
+    crate::db::run(pool, move |conn| {
+        conn.execute(
+            "UPDATE sections SET pinned = NOT pinned WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )?;
+        Ok(())
     })
     .await
 }

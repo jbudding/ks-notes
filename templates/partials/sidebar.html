@@ -1,5 +1,21 @@
 <aside class="sidebar">
   <a class="brand" href="/">📝 ks-notes <span class="brand-version">v{{ crate::VERSION }}</span></a>
+
+  <div class="nav-pinned">
+    {% for s in sections %}
+    {% if s.pinned %}
+    <div class="section-row{% if s.active %} active{% endif %}">
+      <a href="/s/{{ s.id }}">{{ s.name }}</a>
+      <span class="nav-count">{{ s.count }}</span>
+      <form method="post" action="/sections/{{ s.id }}/pin">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn-ghost section-pin pinned" title="Unpin section">📌</button>
+      </form>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
   <nav class="nav">
     <a href="/" {% if nav_active == "global" %}class="active"{% endif %}>Global</a>
     <a href="/home" {% if nav_active == "home" %}class="active"{% endif %}>Home <span class="nav-count">{{ counts.home }}</span></a>
@@ -19,6 +35,10 @@
     <div class="section-row{% if s.active %} active{% endif %}">
       <a href="/s/{{ s.id }}">{{ s.name }}</a>
       <span class="nav-count">{{ s.count }}</span>
+      <form method="post" action="/sections/{{ s.id }}/pin">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn-ghost section-pin{% if s.pinned %} pinned{% endif %}" title="{% if s.pinned %}Unpin section{% else %}Pin section{% endif %}">📌</button>
+      </form>
       <form method="post" action="/sections/{{ s.id }}/delete"
             onsubmit="return confirm('Delete this section? Its notes move back to Home.')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

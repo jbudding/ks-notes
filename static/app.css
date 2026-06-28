@@ -103,6 +103,11 @@ a:hover { text-decoration: underline; }
 .section-del { padding: 0 4px; opacity: 0; }
 .section-row:hover .section-del { opacity: 0.6; }
 .section-del:hover { opacity: 1; color: var(--danger); }
+.section-pin { padding: 0 4px; opacity: 0; font-style: normal; }
+.section-row:hover .section-pin { opacity: 0.5; }
+.section-pin.pinned { opacity: 0.5; }
+.section-pin:hover { opacity: 1 !important; }
+.nav-pinned { margin-bottom: 8px; }
 .add-section { display: flex; gap: 4px; margin-top: 6px; }
 .add-section input { flex: 1; min-width: 0; font-size: 0.9em; padding: 4px 8px; }
 
