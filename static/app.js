@@ -34,20 +34,49 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
+// Legacy copy for non-secure (http) pages, where navigator.clipboard is absent.
+function execCommandCopy(text) {
+  var ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "-1000px";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  var ok = false;
+  try { ok = document.execCommand("copy"); } catch (_) {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+// navigator.clipboard only exists on https/localhost; fall back otherwise so
+// copy buttons still work over plain http. Resolves to true/false for success.
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      function () { return true; },
+      function () { return execCommandCopy(text); }
+    );
+  }
+  return Promise.resolve(execCommandCopy(text));
+}
+
 // Copy buttons:
 //   data-copy="..."      → copies an absolute URL (share links)
 //   data-copy-text="..." → copies the value verbatim (note-link markup)
 document.addEventListener("click", function (e) {
   var btn = e.target.closest("[data-copy], [data-copy-text]");
-  if (btn) {
-    var text = btn.hasAttribute("data-copy-text")
-      ? btn.getAttribute("data-copy-text")
-      : new URL(btn.getAttribute("data-copy"), location.href).href;
-    navigator.clipboard.writeText(text);
-    var old = btn.textContent;
-    btn.textContent = "Copied!";
+  if (!btn) return;
+  var text = btn.hasAttribute("data-copy-text")
+    ? btn.getAttribute("data-copy-text")
+    : new URL(btn.getAttribute("data-copy"), location.href).href;
+  var old = btn.textContent;
+  copyText(text).then(function (ok) {
+    btn.textContent = ok ? "Copied!" : "Copy failed";
     setTimeout(function () { btn.textContent = old; }, 1200);
-  }
+  });
 });
 
 document.addEventListener("DOMContentLoaded", function () {
