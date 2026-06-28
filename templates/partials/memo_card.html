@@ -17,6 +17,8 @@
         {% if m.pinned %}Unpin{% else %}Pin{% endif %}
       </button>
       <button class="btn-ghost" data-copy="/m/{{ m.uid }}">Link</button>
+      <button class="btn-ghost" data-copy-text="{{ m.link_token }}"
+              title="Copy markup to link this note from another note">Ref</button>
       <button class="btn-ghost" hx-post="/memos/{{ m.id }}/archive"
               hx-target="closest .memo-card" hx-swap="outerHTML">Archive</button>
       {% else %}

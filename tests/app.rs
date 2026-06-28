@@ -124,6 +124,14 @@ fn extract_uid(card_html: &str) -> String {
         .expect("uid in card")
 }
 
+fn extract_uuid(card_html: &str) -> String {
+    card_html
+        .split("data-copy-text=\"{{memo:")
+        .nth(1)
+        .map(|s| s.split("}}").next().unwrap().to_string())
+        .expect("uuid in card")
+}
+
 #[tokio::test]
 async fn first_user_is_admin_and_registration_gates() {
     let dir = tempfile::tempdir().unwrap();
@@ -196,6 +204,37 @@ async fn csrf_is_enforced_and_markdown_renders() {
     assert!(card.contains("<strong>bold</strong>"));
     assert!(!card.contains("<script>alert(1)</script>"));
     assert!(card.contains("memo-card"));
+}
+
+#[tokio::test]
+async fn memo_links_resolve_and_break() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = test_app(&dir);
+    let s = register(&app, "alice", "password123").await.unwrap();
+
+    // The target note, whose uuid we'll embed in another note.
+    let target = create_memo(&app, &s, "Target note alpha", "private").await;
+    let target_uid = extract_uid(&target);
+    let target_uuid = extract_uuid(&target);
+
+    // A note embedding the link resolves it to a titled chip pointing at /m/<uid>.
+    let linker = create_memo(&app, &s, &format!("see {{{{memo:{target_uuid}}}}}"), "private").await;
+    assert!(
+        linker.contains(&format!("<a class=\"memo-link\" href=\"/m/{target_uid}\">Target note alpha</a>")),
+        "expected resolved note link, got: {linker}"
+    );
+
+    // A link to a non-existent note renders as a broken placeholder, never raw markup.
+    let broken = create_memo(
+        &app,
+        &s,
+        "dangling {{memo:00000000-0000-4000-8000-000000000000}}",
+        "private",
+    )
+    .await;
+    assert!(broken.contains("memo-link-broken"), "expected broken link: {broken}");
+    // The embedded (bogus) token must not survive as raw text in the rendered body.
+    assert!(!broken.contains("{{memo:00000000"), "raw token leaked: {broken}");
 }
 
 #[tokio::test]
@@ -663,7 +702,7 @@ async fn export_selects_by_tag_and_import_isolates() {
     assert!(page.contains("Imported 1 new"), "summary: {page}");
 
     assert!(body_text(get(&app, &bob, "/imported").await).await.contains("work note"));
-    assert!(!body_text(get(&app, &bob, "/").await).await.contains("work note"), "imported note must not show in Home");
+    assert!(!body_text(get(&app, &bob, "/home").await).await.contains("work note"), "imported note must not show in Home");
 
     // Re-importing the same file doesn't duplicate.
     let page = body_text(app.clone().oneshot(import_req(&bob, &json)).await.unwrap()).await;
@@ -805,11 +844,11 @@ async fn tag_sidebar_is_per_feed() {
     let imp = r#"{"version":3,"notes":[{"uuid":"t-1","content":"imported #beta","visibility":"private","created_at":1,"updated_at":1}]}"#;
     app.clone().oneshot(import_req(&s, imp)).await.unwrap();
 
-    // Home: "Home TAGS", #alpha (not #beta), links to /?tag=
-    let home = body_text(get(&app, &s, "/").await).await;
+    // Home: "Home TAGS", #alpha (not #beta), links to /home?tag=
+    let home = body_text(get(&app, &s, "/home").await).await;
     assert!(home.contains("Home TAGS"), "home header: {home}");
     assert!(home.contains("#alpha") && !home.contains("#beta"), "home shows local tags only");
-    assert!(home.contains("href=\"/?tag=alpha\""), "home tag links to home feed");
+    assert!(home.contains("href=\"/home?tag=alpha\""), "home tag links to home feed");
 
     // Imported: "Imported TAGS", #beta (not #alpha), links to /imported?tag=
     let imported = body_text(get(&app, &s, "/imported").await).await;
@@ -905,7 +944,7 @@ async fn sections_create_compose_move_delete() {
 
     // Shows in the section feed, not in Home.
     assert!(body_text(get(&app, &s, &loc).await).await.contains("section note"));
-    let home = body_text(get(&app, &s, "/").await).await;
+    let home = body_text(get(&app, &s, "/home").await).await;
     assert!(!home.contains("section note"), "sectioned note hidden from Home");
     assert!(home.contains("Work"), "section listed in sidebar");
 
@@ -931,7 +970,7 @@ async fn sections_create_compose_move_delete() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert!(body_text(get(&app, &s, "/").await).await.contains("section note"), "moved back to Home");
+    assert!(body_text(get(&app, &s, "/home").await).await.contains("section note"), "moved back to Home");
     assert!(!body_text(get(&app, &s, &loc).await).await.contains("section note"), "gone from section");
 
     // Delete the section; it disappears from the sidebar.
@@ -941,7 +980,7 @@ async fn sections_create_compose_move_delete() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-    assert!(!body_text(get(&app, &s, "/").await).await.contains(">Work<"), "section removed");
+    assert!(!body_text(get(&app, &s, "/home").await).await.contains(">Work<"), "section removed");
 }
 
 // Global spans every bucket (Home + sections + imported), carries the activity
@@ -976,14 +1015,14 @@ async fn global_feed_spans_all_buckets() {
     let imp = r#"{"version":3,"notes":[{"uuid":"g1","content":"imported memo gamma","visibility":"private","created_at":1,"updated_at":1}]}"#;
     app.clone().oneshot(import_req(&s, imp)).await.unwrap();
 
-    // Global shows all three buckets; Home shows only its own note.
-    let g = body_text(get(&app, &s, "/global").await).await;
+    // Global (default /) shows all three buckets; Home (/home) shows only its own note.
+    let g = body_text(get(&app, &s, "/").await).await;
     assert!(g.contains("home memo alpha") && g.contains("section memo beta") && g.contains("imported memo gamma"), "global spans buckets");
-    let h = body_text(get(&app, &s, "/").await).await;
+    let h = body_text(get(&app, &s, "/home").await).await;
     assert!(h.contains("home memo alpha") && !h.contains("section memo beta") && !h.contains("imported memo gamma"), "home is just Home");
 
     // Global search reaches across buckets.
-    let gs = body_text(get(&app, &s, "/global?q=gamma").await).await;
+    let gs = body_text(get(&app, &s, "/?q=gamma").await).await;
     assert!(gs.contains("imported memo gamma") && !gs.contains("home memo alpha"), "global search spans buckets");
 
     // Tracker + date dropdown live on Global, not Home.

@@ -25,6 +25,17 @@ pub struct InlineAttachment {
     pub is_image: bool,
 }
 
+/// One note-to-note link, resolved from a `{{memo:UUID}}` token, ready for inline
+/// substitution. `viewable` is false when the target exists but the current viewer
+/// may not see it (the title is then withheld and the link renders as a locked chip).
+pub struct InlineMemoLink {
+    pub uuid: String,
+    /// The target note's current short uid, used to build its `/m/{uid}` permalink.
+    pub uid: String,
+    pub title: String,
+    pub viewable: bool,
+}
+
 fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -42,6 +53,35 @@ fn escape_html(s: &str) -> String {
 /// True for the base62 uid characters produced by `auth::new_uid`.
 fn is_uid_char(b: u8) -> bool {
     b.is_ascii_alphanumeric()
+}
+
+/// True for the characters of a UUIDv4 string produced by `auth::new_uuid`.
+fn is_uuid_char(b: u8) -> bool {
+    b.is_ascii_hexdigit() || b == b'-'
+}
+
+/// Collect the note uuids referenced by `{{memo:UUID}}` tokens, in order,
+/// de-duplicated. Empty `{{memo}}` placeholders carry no uuid and are ignored.
+pub fn extract_memo_refs(content: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let bytes = content.as_bytes();
+    let needle = b"{{memo:";
+    let mut i = 0;
+    while let Some(pos) = find(&bytes[i..], needle) {
+        let start = i + pos + needle.len();
+        let mut j = start;
+        while j < bytes.len() && is_uuid_char(bytes[j]) {
+            j += 1;
+        }
+        if j > start && bytes.get(j) == Some(&b'}') && bytes.get(j + 1) == Some(&b'}') {
+            let uuid = content[start..j].to_string();
+            if !out.contains(&uuid) {
+                out.push(uuid);
+            }
+        }
+        i = j.max(start);
+    }
+    out
 }
 
 /// Collect the attachment uids referenced by `{{attach:UID}}` tokens, in order,
@@ -68,12 +108,23 @@ pub fn extract_attachment_refs(content: &str) -> Vec<String> {
     out
 }
 
-/// Render memo markdown, then substitute `{{attach:UID}}` tokens with the inline
-/// attachment HTML (images inline, other files as download chips). Only uids in
-/// `atts` are substituted; any leftover attachment tokens are stripped so stray
+/// Render memo markdown, then substitute both attachment (`{{attach:UID}}`) and
+/// note-link (`{{memo:UUID}}`) tokens with their inline HTML. Only tokens present
+/// in `atts` / `links` are substituted; any leftover tokens are stripped so stray
 /// or in-flight placeholders never show as raw text.
+pub fn render_with_inlines(content: &str, atts: &[InlineAttachment], links: &[InlineMemoLink]) -> String {
+    let html = substitute_attachments(render(content), atts);
+    substitute_memo_links(html, links)
+}
+
+/// Render with only attachment tokens substituted (no note links).
 pub fn render_with_attachments(content: &str, atts: &[InlineAttachment]) -> String {
-    let mut html = render(content);
+    render_with_inlines(content, atts, &[])
+}
+
+/// Replace `{{attach:UID}}` tokens (images inline, other files as download chips),
+/// then strip any leftover attachment tokens.
+fn substitute_attachments(mut html: String, atts: &[InlineAttachment]) -> String {
     for a in atts {
         let token = format!("{{{{attach:{}}}}}", a.uid);
         let replacement = if a.is_image {
@@ -94,6 +145,27 @@ pub fn render_with_attachments(content: &str, atts: &[InlineAttachment]) -> Stri
     strip_attachment_tokens(&html)
 }
 
+/// Replace `{{memo:UUID}}` tokens with note-link chips, then turn any leftover
+/// (unresolvable — deleted, or another user's note) memo tokens into a broken-link
+/// placeholder so they never show as raw text.
+fn substitute_memo_links(mut html: String, links: &[InlineMemoLink]) -> String {
+    for l in links {
+        let token = format!("{{{{memo:{}}}}}", l.uuid);
+        let replacement = if l.viewable {
+            format!(
+                "<a class=\"memo-link\" href=\"/m/{uid}\">{title}</a>",
+                uid = l.uid,
+                title = escape_html(&l.title),
+            )
+        } else {
+            // Target exists but isn't visible to this viewer: no title, no href.
+            "<span class=\"memo-link memo-link-locked\">\u{1F512} note</span>".to_string()
+        };
+        html = html.replace(&token, &replacement);
+    }
+    strip_memo_tokens(&html)
+}
+
 /// Remove any remaining `{{attach:...}}` or `{{attach}}` tokens from rendered HTML.
 fn strip_attachment_tokens(html: &str) -> String {
     let bytes = html.as_bytes();
@@ -104,6 +176,29 @@ fn strip_attachment_tokens(html: &str) -> String {
         if html[i..].as_bytes().starts_with(needle) {
             // Drop through the closing `}}` if present, else emit literally.
             if let Some(rel) = find(&bytes[i..], b"}}") {
+                i += rel + 2;
+                continue;
+            }
+        }
+        let ch = html[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Replace any remaining `{{memo:...}}` or `{{memo}}` tokens in rendered HTML with
+/// a broken-link placeholder (the target was deleted or isn't the author's note).
+fn strip_memo_tokens(html: &str) -> String {
+    let bytes = html.as_bytes();
+    let needle = b"{{memo";
+    let broken = "<span class=\"memo-link memo-link-broken\">\u{26A0} missing note</span>";
+    let mut out = String::with_capacity(html.len());
+    let mut i = 0;
+    while i < html.len() {
+        if html[i..].as_bytes().starts_with(needle) {
+            if let Some(rel) = find(&bytes[i..], b"}}") {
+                out.push_str(broken);
                 i += rel + 2;
                 continue;
             }
@@ -222,6 +317,36 @@ mod tests {
         assert_eq!(refs, vec!["AbC123", "zzz999"]);
         // Empty placeholder carries no uid.
         assert!(extract_attachment_refs("text {{attach}} more").is_empty());
+    }
+
+    #[test]
+    fn extracts_memo_refs_in_order() {
+        let a = "11111111-1111-4111-8111-111111111111";
+        let b = "22222222-2222-4222-8222-222222222222";
+        let refs = extract_memo_refs(&format!("see {{{{memo:{a}}}}} and {{{{memo:{b}}}}} again {{{{memo:{a}}}}}"));
+        assert_eq!(refs, vec![a, b]);
+        // Empty placeholder carries no uuid.
+        assert!(extract_memo_refs("text {{memo}} more").is_empty());
+    }
+
+    #[test]
+    fn substitutes_memo_links_locked_and_broken() {
+        let known = "11111111-1111-4111-8111-111111111111";
+        let hidden = "22222222-2222-4222-8222-222222222222";
+        let links = vec![
+            InlineMemoLink { uuid: known.into(), uid: "abc123".into(), title: "My note".into(), viewable: true },
+            InlineMemoLink { uuid: hidden.into(), uid: "def456".into(), title: String::new(), viewable: false },
+        ];
+        let html = render_with_inlines(
+            &format!("a {{{{memo:{known}}}}}\n\nb {{{{memo:{hidden}}}}}\n\nc {{{{memo:33333333-3333-4333-8333-333333333333}}}}"),
+            &[],
+            &links,
+        );
+        assert!(html.contains("<a class=\"memo-link\" href=\"/m/abc123\">My note</a>"));
+        assert!(html.contains("memo-link-locked"));
+        // Unknown target becomes a broken placeholder, never raw token text.
+        assert!(html.contains("memo-link-broken"));
+        assert!(!html.contains("{{memo"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::db::memos::{Feed, MemoQuery};
 use crate::error::{AppError, render};
 use crate::models::TagCount;
 use crate::state::AppState;
-use crate::views::{ActivityGrid, MemoView, activity_grid, memo_view, memo_views};
+use crate::views::{ActivityGrid, MemoView, activity_grid, memo_views};
 
 pub const PAGE_SIZE: i64 = 20;
 
@@ -151,12 +151,12 @@ pub async fn home(
         FeedCfg {
             nav: "home",
             title: "Home".into(),
-            path: "/".into(),
+            path: "/home".into(),
             composer: true,
             activity: false,
             tag_scope: db::memos::TagScope::Home,
             tags_label: "Home".into(),
-            tags_path: "/".into(),
+            tags_path: "/home".into(),
             active_section: None,
         },
     )
@@ -179,12 +179,12 @@ pub async fn global(
         FeedCfg {
             nav: "global",
             title: "Global".into(),
-            path: "/global".into(),
+            path: "/".into(),
             composer: false,
             activity: true,
             tag_scope: db::memos::TagScope::All,
             tags_label: "All".into(),
-            tags_path: "/global".into(),
+            tags_path: "/".into(),
             active_section: None,
         },
     )
@@ -434,12 +434,8 @@ pub async fn memo_page(
     if !db::memos::can_view_considering_state(&memo, viewer) {
         return Err(AppError::NotFound);
     }
-    let attachments = db::resources::for_memos(&state.pool, vec![memo.id])
-        .await?
-        .remove(&memo.id)
-        .unwrap_or_default();
     // Built with viewer=None: the share page is read-only even for the owner.
-    let m = memo_view(&memo, None, attachments);
+    let m = crate::views::single_memo_view(&state.pool, &memo, None).await?;
     let page_title = crate::markdown::excerpt(&memo.content, 60);
     render(&SingleMemoPage { m, page_title })
 }

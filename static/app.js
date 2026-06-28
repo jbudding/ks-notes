@@ -34,11 +34,16 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
-// Copy share link buttons: <button data-copy="...">
+// Copy buttons:
+//   data-copy="..."      → copies an absolute URL (share links)
+//   data-copy-text="..." → copies the value verbatim (note-link markup)
 document.addEventListener("click", function (e) {
-  var btn = e.target.closest("[data-copy]");
+  var btn = e.target.closest("[data-copy], [data-copy-text]");
   if (btn) {
-    navigator.clipboard.writeText(new URL(btn.getAttribute("data-copy"), location.href).href);
+    var text = btn.hasAttribute("data-copy-text")
+      ? btn.getAttribute("data-copy-text")
+      : new URL(btn.getAttribute("data-copy"), location.href).href;
+    navigator.clipboard.writeText(text);
     var old = btn.textContent;
     btn.textContent = "Copied!";
     setTimeout(function () { btn.textContent = old; }, 1200);

@@ -11,7 +11,7 @@ use crate::error::{AppError, render};
 use crate::db::sections::MoveDest;
 use crate::models::{Memo, Section, TagCount, Visibility};
 use crate::state::AppState;
-use crate::views::{MemoView, memo_view};
+use crate::views::MemoView;
 
 #[derive(Template)]
 #[template(path = "partials/memo_card.html")]
@@ -66,11 +66,7 @@ fn parse_form(form: &MemoForm) -> Result<(String, Visibility), AppError> {
 }
 
 async fn card_view(state: &AppState, memo: &Memo, viewer: &crate::models::User) -> Result<MemoView, AppError> {
-    let attachments = db::resources::for_memos(&state.pool, vec![memo.id])
-        .await?
-        .remove(&memo.id)
-        .unwrap_or_default();
-    Ok(memo_view(memo, Some(viewer), attachments))
+    crate::views::single_memo_view(&state.pool, memo, Some(viewer)).await
 }
 
 /// Rendered card plus an out-of-band refresh of the tag sidebar.
@@ -92,7 +88,7 @@ async fn card_with_sidebar(
             let name = db::sections::name(&state.pool, viewer.id, sid).await.unwrap_or_default();
             (db::memos::TagScope::Section(sid), name, format!("/s/{sid}"))
         }
-        _ => (db::memos::TagScope::Home, "Home".to_string(), "/".to_string()),
+        _ => (db::memos::TagScope::Home, "Home".to_string(), "/home".to_string()),
     };
     let sidebar = TagSidebarOob {
         tags: db::memos::tag_counts(&state.pool, viewer.id, scope).await?,

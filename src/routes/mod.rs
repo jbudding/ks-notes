@@ -24,8 +24,8 @@ pub fn router(state: AppState) -> Router {
         mb => mb * 1024 * 1024,
     };
     Router::new()
-        .route("/", get(pages::home))
-        .route("/global", get(pages::global))
+        .route("/", get(pages::global))
+        .route("/home", get(pages::home))
         .route("/explore", get(pages::explore))
         .route("/archive", get(pages::archive))
         .route("/imported", get(pages::imported))

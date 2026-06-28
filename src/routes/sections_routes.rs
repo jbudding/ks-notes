@@ -38,5 +38,5 @@ pub async fn delete(
     auth::require_csrf_field(&session, &form.csrf_token)?;
     db::sections::delete(&state.pool, session.user.id, id).await?;
     // Its notes fall back to Home; go there.
-    Ok(Redirect::to("/").into_response())
+    Ok(Redirect::to("/home").into_response())
 }

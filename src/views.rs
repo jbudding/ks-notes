@@ -4,13 +4,17 @@ use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{Date, Duration, Month, OffsetDateTime};
 
-use crate::models::{Memo, MemoState, ResourceMeta, User};
+use crate::db::memos::LinkTarget;
+use crate::models::{Memo, MemoState, ResourceMeta, User, Visibility};
 
 /// Template-ready memo: markdown pre-rendered, times pre-formatted,
 /// permissions resolved against the viewer.
 pub struct MemoView {
     pub id: i64,
     pub uid: String,
+    pub uuid: String,
+    /// The `{{memo:UUID}}` markup that links to this note, for the "Ref" copy button.
+    pub link_token: String,
     pub username: String,
     pub raw: String,
     pub html: String,
@@ -44,7 +48,22 @@ pub fn format_times(ts: i64) -> (String, String) {
     (iso, display)
 }
 
-pub fn memo_view(memo: &Memo, viewer: Option<&User>, attachments: Vec<ResourceMeta>) -> MemoView {
+/// Whether a viewer may see a link target's title, mirroring `db::memos::can_view`
+/// but working from the bare visibility + author id we resolved for the link.
+fn link_viewable(visibility: Visibility, author_id: i64, viewer: Option<&User>) -> bool {
+    match visibility {
+        Visibility::Public => true,
+        Visibility::Protected => viewer.is_some(),
+        Visibility::Private => viewer.map(|u| u.id == author_id).unwrap_or(false),
+    }
+}
+
+pub fn memo_view(
+    memo: &Memo,
+    viewer: Option<&User>,
+    attachments: Vec<ResourceMeta>,
+    link_targets: &HashMap<(i64, String), LinkTarget>,
+) -> MemoView {
     let (created_iso, created_display) = format_times(memo.created_at);
     let inline: Vec<crate::markdown::InlineAttachment> = attachments
         .into_iter()
@@ -54,12 +73,30 @@ pub fn memo_view(memo: &Memo, viewer: Option<&User>, attachments: Vec<ResourceMe
             is_image: r.content_type.starts_with("image/"),
         })
         .collect();
+    // Resolve `{{memo:UUID}}` tokens against this author's notebook. Unresolved
+    // refs are dropped here and rendered as broken placeholders by the markdown pass.
+    let links: Vec<crate::markdown::InlineMemoLink> = crate::markdown::extract_memo_refs(&memo.content)
+        .into_iter()
+        .filter_map(|uuid| {
+            link_targets.get(&(memo.user_id, uuid.clone())).map(|t| {
+                let viewable = link_viewable(t.visibility, memo.user_id, viewer);
+                crate::markdown::InlineMemoLink {
+                    uuid,
+                    uid: t.uid.clone(),
+                    title: if viewable { crate::markdown::excerpt(&t.content, 60) } else { String::new() },
+                    viewable,
+                }
+            })
+        })
+        .collect();
     MemoView {
         id: memo.id,
         uid: memo.uid.clone(),
+        uuid: memo.uuid.clone(),
+        link_token: format!("{{{{memo:{}}}}}", memo.uuid),
         username: memo.username.clone(),
         raw: memo.content.clone(),
-        html: crate::markdown::render_with_attachments(&memo.content, &inline),
+        html: crate::markdown::render_with_inlines(&memo.content, &inline, &links),
         visibility: memo.visibility.as_str(),
         pinned: memo.pinned,
         archived: memo.state == MemoState::Archived,
@@ -193,7 +230,16 @@ pub fn activity_grid(counts: &HashMap<String, i64>, today: Date) -> ActivityGrid
     }
 }
 
-/// Batch-build views for a feed page, fetching all attachments in one query.
+/// Collect every `(author_user_id, uuid)` note-link pair referenced across `memos`.
+fn link_ref_pairs(memos: &[Memo]) -> Vec<(i64, String)> {
+    memos
+        .iter()
+        .flat_map(|m| crate::markdown::extract_memo_refs(&m.content).into_iter().map(|u| (m.user_id, u)))
+        .collect()
+}
+
+/// Batch-build views for a feed page, fetching all attachments and note-link
+/// targets in one query each.
 pub async fn memo_views(
     pool: &deadpool_sqlite::Pool,
     memos: &[Memo],
@@ -202,8 +248,23 @@ pub async fn memo_views(
     let ids: Vec<i64> = memos.iter().map(|m| m.id).collect();
     let mut attachments: HashMap<i64, Vec<ResourceMeta>> =
         crate::db::resources::for_memos(pool, ids).await?;
+    let targets = crate::db::memos::link_targets(pool, link_ref_pairs(memos)).await?;
     Ok(memos
         .iter()
-        .map(|m| memo_view(m, viewer, attachments.remove(&m.id).unwrap_or_default()))
+        .map(|m| memo_view(m, viewer, attachments.remove(&m.id).unwrap_or_default(), &targets))
         .collect())
+}
+
+/// Build a single memo's view, fetching its attachments and resolving its note links.
+pub async fn single_memo_view(
+    pool: &deadpool_sqlite::Pool,
+    memo: &Memo,
+    viewer: Option<&User>,
+) -> Result<MemoView, crate::error::AppError> {
+    let attachments = crate::db::resources::for_memos(pool, vec![memo.id])
+        .await?
+        .remove(&memo.id)
+        .unwrap_or_default();
+    let targets = crate::db::memos::link_targets(pool, link_ref_pairs(std::slice::from_ref(memo))).await?;
+    Ok(memo_view(memo, viewer, attachments, &targets))
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use deadpool_sqlite::Pool;
 use rusqlite::types::Value;
 use rusqlite::{Connection, params, params_from_iter};
@@ -160,6 +162,56 @@ pub async fn update(
 
 pub async fn get(pool: &Pool, memo_id: i64) -> Result<Memo, AppError> {
     crate::db::run(pool, move |conn| get_by_id_sync(conn, memo_id)).await
+}
+
+/// Resolution of a `{{memo:UUID}}` note link: the target's current permalink uid,
+/// its content (for the inline title) and visibility (to gate that title).
+pub struct LinkTarget {
+    pub uid: String,
+    pub content: String,
+    pub visibility: Visibility,
+}
+
+/// Resolve note links by `(author_user_id, uuid)` pairs, keyed by that same pair.
+/// uuids are only unique per user, so links always resolve within the embedding
+/// note's own author's notebook. Missing pairs are simply absent from the map.
+pub async fn link_targets(
+    pool: &Pool,
+    pairs: Vec<(i64, String)>,
+) -> Result<HashMap<(i64, String), LinkTarget>, AppError> {
+    crate::db::run(pool, move |conn| {
+        let mut map = HashMap::new();
+        if pairs.is_empty() {
+            return Ok(map);
+        }
+        let values = vec!["(?,?)"; pairs.len()].join(",");
+        let sql = format!(
+            "SELECT user_id, uuid, uid, content, visibility FROM memos
+             WHERE (user_id, uuid) IN (VALUES {values})"
+        );
+        let mut binds: Vec<Value> = Vec::with_capacity(pairs.len() * 2);
+        for (user_id, uuid) in &pairs {
+            binds.push(Value::Integer(*user_id));
+            binds.push(Value::Text(uuid.clone()));
+        }
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(binds), |r| {
+            Ok((
+                (r.get::<_, i64>(0)?, r.get::<_, String>(1)?),
+                LinkTarget {
+                    uid: r.get(2)?,
+                    content: r.get(3)?,
+                    visibility: r.get(4)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (key, target) = row?;
+            map.insert(key, target);
+        }
+        Ok(map)
+    })
+    .await
 }
 
 pub async fn get_by_uid(pool: &Pool, uid: String) -> Result<Memo, AppError> {

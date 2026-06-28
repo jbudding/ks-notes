@@ -410,6 +410,20 @@ body.has-expanded-memo { overflow: hidden; }
 .memo-content > *:first-child { margin-top: 0; }
 .memo-content > *:last-child { margin-bottom: 0; }
 .memo-content img { max-width: 100%; border-radius: 8px; }
+/* Inline note-to-note links rendered from {{memo:UUID}} markup. */
+.memo-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
+  padding: 0 0.35em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  background: var(--bg);
+}
+.memo-link::before { content: "\1F517"; font-size: 0.85em; opacity: 0.7; }
+.memo-link-locked, .memo-link-broken { color: var(--text-muted); cursor: default; }
+.memo-link-broken { border-style: dashed; }
 .memo-content pre {
   background: var(--bg);
   border: 1px solid var(--border);
