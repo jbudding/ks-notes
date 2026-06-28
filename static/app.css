@@ -411,7 +411,8 @@ label { display: block; margin: 12px 0 4px; font-weight: 500; }
 .memo-card.memo-expanded .memo-actions { opacity: 1; }
 body.has-expanded-memo { overflow: hidden; }
 
-.memo-content { overflow-wrap: anywhere; }
+.memo-content { overflow-wrap: anywhere; max-height: 10lh; overflow: hidden; }
+.memo-card.memo-expanded .memo-content { max-height: none; overflow: visible; }
 .memo-content > *:first-child { margin-top: 0; }
 .memo-content > *:last-child { margin-bottom: 0; }
 .memo-content img { max-width: 100%; border-radius: 8px; }
